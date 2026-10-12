@@ -68,6 +68,13 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .page{display:grid;gap:16px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 @media (max-width:820px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.hist{display:grid}
+.hist .h{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;padding:8px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+.hist .h:hover{background:var(--sunk)}
+.hist .op{font-size:.72rem;font-weight:600;border-radius:4px;padding:1px 6px;white-space:nowrap}
+.hist .op.add{background:var(--inc-soft);color:var(--inc)}.hist .op.edit{background:var(--sav-soft);color:var(--sav)}.hist .op.del{background:var(--exp-soft);color:var(--exp)}
+.hist .w{grid-column:2 / -1;font-size:.76rem;color:var(--muted)}
+.hist .gone{opacity:.6;cursor:default}
 .panel.alert{border:2px solid var(--exp);background:color-mix(in srgb,var(--exp) 10%,var(--surface))}
 .panel.alert h2{color:var(--exp)}
 .sa{display:grid;gap:10px}.sa-row{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
@@ -442,6 +449,10 @@ details summary{cursor:pointer;font-weight:500}
 
   <!-- SETTINGS -->
   <section class="page" id="page-settings" hidden>
+    <div class="panel" id="histPanel">
+      <div class="panel-head"><h2>ประวัติการบันทึก</h2><span class="hint">ล่าสุดอยู่บน · แตะเพื่อเปิดรายการ</span></div>
+      <div id="histList" class="hist"></div>
+    </div>
     <div class="panel">
       <h2>ซิงก์มือถือกับคอมผ่าน Google Sheet</h2>
       <p class="hint" style="margin:0">ติดตั้งสคริปต์ในชีตตามขั้นตอนใน README แล้วใส่ลิงก์ Web app กับรหัสลับ ทำครั้งเดียวในแต่ละเครื่อง แอปจะอ่านทุกแท็บปีในชีต (เช่น 2024, 2025) มาแสดงด้วย</p>
@@ -830,8 +841,27 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: renderCatColors})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); }})[page](P);
   fillLists();
+}
+let histLimit = 40;
+function renderHistory(){
+  const box = $("histList"); if (!box) return;
+  box.textContent = "";
+  const log = store.log ? store.log() : [];
+  if (!log.length){ box.append(el("div", "empty", "ยังไม่มีประวัติในเครื่องนี้ (เริ่มเก็บตั้งแต่อัปเดตนี้)")); return; }
+  const OP = {add: "เพิ่ม", edit: "แก้", del: "ลบ"};
+  const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? "เมื่อกี้" : m < 60 ? `${m} นาทีก่อน` : m < 1440 ? `${Math.round(m / 60)} ชม.ก่อน` : thaiDate(t.slice(0, 10)); };
+  for (const h of log.slice(0, histLimit)){
+    const cur = allEntries.find(x => x.id === h.e.id), e = cur || h.e, gone = !cur;
+    const r = el("div", "h" + (gone ? " gone" : ""));
+    const title = e.kind === "saving" ? `${e.name}${e.group ? " · " + e.group : ""}` : (e.note ? `${e.note}` : e.name) || "—";
+    r.append(el("span", "op " + h.op, OP[h.op] || h.op), el("span", "", title), el("span", `num ${e.kind}`, fmt(e.amount)));
+    r.append(el("div", "w", `${ago(h.t)} · ${KIND_LABEL[e.kind] || ""} ${e.kind !== "saving" && e.note ? e.name + " · " : ""}วันที่ ${thaiDate(e.date)}${e.biz && e.biz !== PERSONAL ? " · " + e.biz : ""}${e.billId ? " · ในบิล" : ""}${gone ? (h.op === "del" ? "" : " · ถูกลบไปแล้ว") : ""}`));
+    if (!gone){ r.tabIndex = 0; r.title = "แตะเพื่อเปิดรายการนี้"; const o = () => openForm(cur); r.addEventListener("click", o); r.addEventListener("keydown", ev => { if (ev.key === "Enter") o(); }); }
+    box.append(r);
+  }
+  if (log.length > histLimit){ const b = el("button", "btn sm more", `ดูเพิ่ม (อีก ${log.length - histLimit})`); b.type = "button"; b.addEventListener("click", () => { histLimit += 60; renderHistory(); }); box.append(b); }
 }
 function renderCatColors(){
   const box = $("catColors"); if (!box) return;
@@ -1481,15 +1511,17 @@ function makeCombo(p, placeholder){
     else if (ev.key === "Enter"){ if (!list.hidden && items[act]){ ev.preventDefault(); choose(items[act]); } else if (!list.hidden) ev.preventDefault(); }
     else if (ev.key === "Escape"){ if (!list.hidden){ ev.preventDefault(); ev.stopPropagation(); close(); syncCombo(p); } }
   });
-  ci.addEventListener("blur", () => setTimeout(() => {
+  // Leaving the box keeps what was typed, at once: tapping Save straight after typing must save that text.
+  // (Tapping an option does not blur, its pointerdown keeps the focus here.)
+  p.commit = () => {
     if (list.hidden) return;
-    // leaving with new text keeps it as a new name; leaving empty clears an optional field
     const typed = ci.value.trim(), cur = p.sel.value === NEW ? p.inp.value : (p.sel.selectedOptions[0]?.textContent || "");
     close();
     if (!typed || typed === cur.trim()) return syncCombo(p);
-    const hit = items.find(it => !it.add && norm(it.t) === norm(typed));
+    const hit = items.find(it => !it.add && !it.start && norm(it.t) === norm(typed));
     choose(hit || {add: typed});
-  }, 120));
+  };
+  ci.addEventListener("blur", p.commit);
   syncCombo(p);
 }
 makeCombo(pk.note, "พิมพ์ค้นหา หรือพิมพ์รายละเอียดใหม่");
@@ -1694,8 +1726,9 @@ $("delAllBtn").addEventListener("click", async () => {
   await store.remove(ids); $("dlg").close();
 });
 
+const commitCombos = () => Object.values(pk).forEach(p => p.commit && p.commit());
 $("entryForm").addEventListener("submit", async ev => {
-  ev.preventDefault();
+  ev.preventDefault(); commitCombos();
   const amount = Math.round(parseFloat($("fAmount").value) * 100) / 100;
   const date = $("fDate").value, name = pickVal(pk.name);
   if (!date || !isFinite(amount) || !name){ toast("กรอกวันที่ หมวด และจำนวนเงินให้ครบ", true); return; }
@@ -1740,7 +1773,9 @@ $("entryForm").addEventListener("submit", async ev => {
   try {
     await store.save(out);
     if (editing){ $("dlg").close(); return; }
-    toast(out.length > 1 ? `บันทึกผ่อน ${out.length} งวดแล้ว` : `บันทึก${KIND_LABEL[kind]} ${fmt(amount)} บาทแล้ว เพิ่มรายการต่อได้เลย`);
+    const where = `${name}${base.note ? " · " + base.note : ""} วันที่ ${thaiDate(date)}`;
+    const away = !inPeriod(out[0]) ? ` (อยู่${mode === "month" ? `เดือน ${TH_MONTHS[+date.slice(5,7) - 1]} ${date.slice(0,4)}` : `ปี ${date.slice(0,4)}`} ไม่ใช่ช่วงที่เปิดดูอยู่)` : "";
+    toast(out.length > 1 ? `บันทึกผ่อน ${out.length} งวดแล้ว` : `บันทึก${KIND_LABEL[kind]} ${fmt(amount)} บาทแล้ว: ${where}${away}`);
     // keep date, owner, category for the next item from the same bill
     const keepName = name, keepBiz = pickVal(pk.biz), keepShop = pickVal(pk.shop), keepPay = $("fPay").value, keepAcc = pickVal(pk.acc);
     ["fAmount","fUnit","fQty","fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true;
@@ -1838,6 +1873,7 @@ function openBill(billId){
   $("billBox").scrollIntoView({block: "nearest"});
 }
 $("billAdd").addEventListener("click", () => {
+  commitCombos();
   const it = itemFromForm();
   if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
   putInBill(it);
@@ -1853,6 +1889,7 @@ $("fPay").addEventListener("change", showBillUI);
 ["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).addEventListener("input", () => { if (bill.length) showBillUI(); }));
 $("fItemDiscType").addEventListener("change", () => { if (bill.length) showBillUI(); });
 $("billSave").addEventListener("click", async () => {
+  commitCombos();
   // the item still typed in the form counts too
   const extra = itemFromForm(); if (extra) putInBill(extra);
   const date = $("fDate").value;
@@ -2071,16 +2108,25 @@ function initStore(){
     if ((ls.get("money-book-script", 0)) < 4 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
     enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || "", note: orig.note || ""}});
   }
+  // What was saved on this device, newest first, so a save that seems lost can be found again.
+  const LOG = "money-book-log";
+  const snap = e => ({id: e.id, kind: e.kind, date: e.date, name: e.name || "", note: e.note || "", group: e.group || "", amount: e.amount, biz: e.biz || "", billId: e.billId || ""});
+  function logOps(op, list){
+    if (!list.length) return;
+    const t = new Date().toISOString();
+    ls.set(LOG, [...list.map(e => ({t, op: typeof op === "function" ? op(e) : op, e: snap(e)})), ...ls.get(LOG, [])].slice(0, 400));
+  }
   store = {
     kind: "local",
+    log(){ return ls.get(LOG, []); },
     subscribe(fn){ subs.push(fn); fn(read()); },
-    async save(list){ const l = read(); for (const e of list){ const i = l.findIndex(x => x.id === e.id); if (i >= 0) l[i] = e; else l.push(e); } write(l); enqueue(...list.map(e => ({op:"put", entry:e}))); },
-    async remove(ids){ const s = new Set(ids); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
+    async save(list){ const l = read(); const had = new Set(l.map(x => x.id)); logOps(e => had.has(e.id) ? "edit" : "add", list); for (const e of list){ const i = l.findIndex(x => x.id === e.id); if (i >= 0) l[i] = e; else l.push(e); } write(l); enqueue(...list.map(e => ({op:"put", entry:e}))); },
+    async remove(ids){ const s = new Set(ids); logOps("del", read().filter(e => s.has(e.id))); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
     setSetting(key, value){ writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
     status(){ idle(); },
     // Change or clear a row the user typed in a year tab of the sheet.
-    async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
-    async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); write(read().filter(x => x.id !== orig.id)); },
+    async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
+    async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
@@ -2209,6 +2255,7 @@ function snapSum(){
   if (snapTotal && Math.abs(net - snapTotal) > 0.009) sm.append(el("div", "warn", `ยอดรายการรวม ${fmt(net)} ไม่ตรงกับ Total ${fmt(snapTotal)} (ต่างกัน ${fmt(Math.abs(net - snapTotal))}) ลองดูว่าอ่านราคาไหนผิดหรือขาดรายการไหน`));
 }
 $("snapToBill").addEventListener("click", () => {
+  commitCombos();
   const formCat = pickVal(pk.name), rows = snapRows.filter(r => r.name.trim() && r.price > 0);
   if (!rows.length){ toast("ไม่มีรายการให้เพิ่ม", true); return; }
   if (rows.some(r => !r.cat) && !formCat){ toast("เลือกหมวดในช่องหมวดก่อน (ใช้กับรายการที่ยังไม่มีหมวด)", true); $("fNameQ")?.focus(); return; }
