@@ -116,10 +116,22 @@ tr.entry.editing td{background:var(--sav-soft)}
 .year td.m{white-space:nowrap}
 .year tr.cur td{background:var(--sunk);font-weight:600}
 .year tfoot td{font-weight:600;border-top:2px solid var(--fg);border-bottom:0}
-.yearstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.yearstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
 .ys{background:var(--sunk);border-radius:8px;padding:10px 12px}
 .ys .k{font-size:.78rem;color:var(--muted)} .ys .v{font-family:var(--font-display);font-weight:600;font-size:1.1rem}
 details summary{cursor:pointer;font-weight:500}
+
+.bizbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bizbar .k{font-size:.82rem;color:var(--muted)}
+.pick{display:grid;gap:6px}
+.tag{display:inline-block;font-size:.7rem;padding:0 6px;border-radius:4px;background:var(--sunk);color:var(--muted);margin-left:4px;white-space:nowrap}
+.snap{display:grid;gap:8px;background:var(--sunk);border-radius:8px;padding:10px 12px}
+.snap .actions label{cursor:pointer}
+.snapitems{display:grid;gap:6px;max-height:320px;overflow:auto}
+.snapitem{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:start;font-size:.85rem;background:var(--surface);border-radius:6px;padding:6px 8px}
+.snapitem input{width:auto;margin-top:4px}
+.ocrtext{white-space:pre-wrap;font-size:.78rem;max-height:160px;overflow:auto;background:var(--surface);border-radius:6px;padding:6px 8px;margin:6px 0 0}
+.bizsum td:first-child{white-space:nowrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -137,6 +149,11 @@ details summary{cursor:pointer;font-weight:500}
     </div>
   </header>
 
+  <div class="bizbar">
+    <span class="k">ดูบัญชี</span>
+    <div class="chips" role="group" aria-label="เลือกร้านหรือกิจการ" id="bizChips"></div>
+  </div>
+
   <section class="totals" aria-label="สรุปประจำเดือน">
     <div class="tot inc"><span class="k">รายรับรวมประจำเดือน</span><span class="v num" id="tInc">0.00</span></div>
     <div class="tot exp"><span class="k">รายจ่ายรวมประจำเดือน</span><span class="v num" id="tExp">0.00</span></div>
@@ -152,12 +169,34 @@ details summary{cursor:pointer;font-weight:500}
         <button type="button" data-k="expense" aria-pressed="true">ค่าใช้จ่าย</button>
         <button type="button" data-k="saving" aria-pressed="false">ออม+ลงทุน</button>
       </div>
+      <div class="snap" id="snapBox" hidden>
+        <div class="actions">
+          <label class="btn primary" for="snapCam">📷 ถ่ายรูปใบเสร็จ/สลิป</label>
+          <input id="snapCam" type="file" accept="image/*" capture="environment" hidden>
+          <label class="btn" for="snapPick">เลือกรูป</label>
+          <input id="snapPick" type="file" accept="image/*" hidden>
+        </div>
+        <div class="hint" id="snapHint">ถ่ายรูปใบเสร็จ บิล หรือสลิปโอนเงิน แล้วระบบจะกรอกฟอร์มให้ ตรวจแล้วกดบันทึก</div>
+        <div class="toast" id="snapMsg" role="status"></div>
+        <div id="snapItemsWrap" hidden>
+          <div class="hint" id="snapItemsHead"></div>
+          <div class="snapitems" id="snapItems"></div>
+          <div class="actions" style="margin-top:8px">
+            <button class="btn primary" type="button" id="snapSaveAll">บันทึกรายการที่เลือก</button>
+            <button class="btn" type="button" id="snapUseTotal">ใช้ยอดรวมรายการเดียว</button>
+          </div>
+        </div>
+        <details id="snapTextWrap" hidden><summary class="hint">ข้อความที่อ่านได้จากรูป</summary><pre class="ocrtext" id="snapText"></pre></details>
+      </div>
       <form id="entryForm" autocomplete="off">
+        <div class="field" id="bizField"><label for="fBiz">ร้าน/กิจการ</label>
+          <div class="pick"><select id="fBiz"></select><input id="fBizNew" hidden placeholder="พิมพ์ชื่อร้านหรือกิจการใหม่"></div></div>
         <div class="row2">
           <div class="field"><label for="fDate">วันที่</label><input id="fDate" type="date" required></div>
           <div class="field"><label for="fAmount">จำนวนเงิน (บาท)</label><input id="fAmount" type="number" step="0.01" min="0" inputmode="decimal" required></div>
         </div>
-        <div class="field"><label for="fName" id="fNameLabel">ชื่อรายการ</label><input id="fName" list="nameList" required placeholder="เช่น ค่าอาหาร"><datalist id="nameList"></datalist></div>
+        <div class="field"><label for="fName" id="fNameLabel">ชื่อรายการ</label>
+          <div class="pick"><select id="fName"></select><input id="fNameNew" hidden placeholder="พิมพ์ชื่อรายการใหม่"></div></div>
         <div class="row2" id="unitRow">
           <div class="field"><label for="fUnit">ราคาต่อชิ้น</label><input id="fUnit" type="number" step="0.01" min="0" inputmode="decimal"></div>
           <div class="field"><label for="fQty">จำนวนชิ้น</label><input id="fQty" type="number" step="1" min="0" inputmode="numeric"></div>
@@ -166,7 +205,8 @@ details summary{cursor:pointer;font-weight:500}
           <div class="field"><label for="fSide">ซื้อ/ขาย</label><select id="fSide"><option>ซื้อ</option><option>ขาย</option></select></div>
           <div class="field"><label for="fGroup">กลุ่ม</label><input id="fGroup" list="groupList" placeholder="เช่น ออมฉุกเฉิน"><datalist id="groupList"></datalist></div>
         </div>
-        <div class="field" id="noteField"><label for="fNote">รายละเอียดอื่นๆ</label><input id="fNote" placeholder="เช่น ซูชิแซลมอน"></div>
+        <div class="field" id="noteField"><label for="fNote">รายละเอียดอื่นๆ</label>
+          <div class="pick"><select id="fNote"></select><input id="fNoteNew" hidden placeholder="พิมพ์รายละเอียดใหม่ เช่น ซูชิแซลมอน"></div></div>
         <div class="actions">
           <button class="btn primary" type="submit" id="saveBtn">บันทึก</button>
           <button class="btn" type="button" id="cancelEdit" hidden>ยกเลิกแก้ไข</button>
@@ -184,6 +224,18 @@ details summary{cursor:pointer;font-weight:500}
           <textarea id="impText" placeholder="3/ก.ค./2026	Muan	760.00	ค่าขนม สนามแบต	2026-7"></textarea>
           <div class="actions"><button class="btn" type="button" id="impPreview">ตรวจข้อมูล</button><button class="btn primary" type="button" id="impGo" disabled>นำเข้า</button></div>
           <div class="toast" id="impMsg" role="status"></div>
+        </div>
+      </details>
+
+      <details id="syncBox">
+        <summary>ซิงก์มือถือกับคอมผ่าน Google Sheet</summary>
+        <div style="display:grid;gap:8px;margin-top:10px">
+          <p class="hint" style="margin:0">ติดตั้งสคริปต์ในชีตของคุณตามขั้นตอนใน README แล้วใส่ลิงก์ Web app กับรหัสลับที่นี่ ทำครั้งเดียวในแต่ละเครื่อง</p>
+          <div class="field"><label for="syncUrl">ลิงก์ Web app</label><input id="syncUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec"></div>
+          <div class="field"><label for="syncKey">รหัสลับ</label><input id="syncKey" type="password" autocomplete="off"></div>
+          <div class="actions"><button class="btn primary" type="button" id="syncOn">เชื่อมต่อ</button><button class="btn" type="button" id="syncOff" hidden>เลิกเชื่อมต่อ</button></div>
+          <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่ของในชีต)</button>
+          <div class="toast" id="syncMsg" role="status"></div>
         </div>
       </details>
     </aside>
@@ -205,8 +257,15 @@ details summary{cursor:pointer;font-weight:500}
         </table>
       </div>
       <p class="note" style="margin:0">แตะที่รายการเพื่อแก้ไขหรือลบ</p>
+      <div id="bizWrap">
+        <h3 style="font-size:1rem;margin-bottom:6px">แยกตามร้าน/กิจการ (เดือนนี้)</h3>
+        <div class="scroll"><table class="bizsum">
+          <thead><tr><th>ร้าน/กิจการ</th><th class="amt">รายรับ</th><th class="amt">รายจ่าย</th><th class="amt">กำไร/คงเหลือ</th></tr></thead>
+          <tbody id="bizBody"></tbody>
+        </table></div>
+      </div>
       <div id="catWrap">
-        <h3 style="font-size:1rem;margin-bottom:10px">ค่าใช้จ่ายแยกตามหมวด</h3>
+        <h3 style="font-size:1rem;margin-bottom:10px" id="catTitle">ค่าใช้จ่ายแยกตามหมวด</h3>
         <div class="bars" id="catBars"></div>
       </div>
     </section>
@@ -247,6 +306,17 @@ const DEFAULT_NAMES = {
   saving:["Dime!","Kept","Make by Kbank","Finnomena"]
 };
 const DEFAULT_GROUPS = ["ออมฉุกเฉิน 🟥","ออมไปญี่ปุ่น","ออมไปญี่ปุ่น (ME) 🟥","รับปริญญา 🟥","LLY","K-US500X-A(A)","K-USXNDQ-A(A)","SCBGOLD"];
+const PERSONAL = "ส่วนตัว";
+const DEFAULT_BIZ = [PERSONAL, "Muan", "ร้านขายกำไล"];
+const BIZ_LABEL = {Muan:"Muan (ร้านคาเฟ่)"};
+const bizLabel = b => BIZ_LABEL[b] || b;
+// Older rows from the sheet have no shop field: the sheet used the name "Muan" for the cafe.
+const bizOf = e => e.biz || (e.name === "Muan" ? "Muan" : PERSONAL);
+const SHOP_NAMES = {
+  income:["ยอดขาย","รายได้อื่นๆ"],
+  expense:["ค่าวัตถุดิบ","ค่าบรรจุภัณฑ์","ค่าอุปกรณ์","ค่าส่งของ","ค่าเช่า","ค่าน้ำค่าไฟ","อื่นๆ"]
+};
+const NEW = "__new__";
 
 const $ = id => document.getElementById(id);
 const fmt = n => (Number(n)||0).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -260,6 +330,7 @@ let entries = [];          // [{id, kind, date, name, amount, note, unitPrice, q
 let curYM = todayISO.slice(0,7);
 let kind = "expense";
 let filter = "all";
+let bizFilter = "all";
 let editingId = null;
 let store = null;
 
@@ -287,10 +358,121 @@ function _unused(db){
     newId(){ return col.doc().id; }
   };
 }
+// Data lives in this browser (localStorage). When connected to a Google Apps Script
+// web app, every change is also queued and sent to the user's Google Sheet, and the
+// sheet's copy is pulled on open, so phone and computer see the same data.
 function initStore(){
-  store = localStore();
-  $("storeNote").textContent = "ข้อมูลเก็บไว้ในเบราว์เซอร์เครื่องนี้ กด \"ส่งออก CSV\" เป็นระยะเพื่อสำรองข้อมูล";
+  const KEY = "money-book-entries", CFG = "money-book-sync", Q = "money-book-queue";
+  const ls = {
+    get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    del(k){ try { localStorage.removeItem(k); } catch {} }
+  };
+  const subs = [];
+  const read = () => ls.get(KEY, []);
+  const write = list => { ls.set(KEY, list); subs.forEach(f => f(list)); };
+  let cfg = ls.get(CFG, null);
+  let busy = false;
+
+  const fmtTime = () => new Date().toLocaleTimeString("th-TH", {hour:"2-digit", minute:"2-digit"});
+  function status(msg, bad){
+    $("storeNote").textContent = msg;
+    $("syncMsg").textContent = msg; $("syncMsg").style.color = bad ? "var(--exp)" : "var(--muted)";
+  }
+  function idle(){
+    const n = ls.get(Q, []).length;
+    if (!cfg) status("ข้อมูลเก็บไว้ในเบราว์เซอร์เครื่องนี้ เชื่อม Google Sheet เพื่อซิงก์ระหว่างมือถือกับคอม");
+    else status(n ? `ยังไม่ได้ส่งขึ้น Google Sheet ${n} รายการ จะลองใหม่อัตโนมัติ` : `ซิงก์กับ Google Sheet แล้ว ${fmtTime()}`, !!n);
+  }
+  const ERR = {wrong_key:"รหัสลับไม่ตรงกับในสคริปต์", secret_not_set:"ยังไม่ได้ตั้งรหัสลับในสคริปต์"};
+  async function call(body, c = cfg){
+    let r;
+    try { r = await fetch(c.url, {method:"POST", body: JSON.stringify({...body, key: c.key})}); }
+    catch { throw new Error("ต่ออินเทอร์เน็ตไม่ได้"); }
+    let j; try { j = await r.json(); } catch { throw new Error("ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้"); }
+    if (!j.ok) throw new Error(ERR[j.error] || j.error || "เชื่อมต่อไม่สำเร็จ");
+    return j;
+  }
+  let seq = Date.now();
+  function enqueue(op){
+    if (!cfg) return;
+    let q = ls.get(Q, []);
+    if (op.op === "replaceAll") q = [];
+    q.push({...op, seq: ++seq});
+    ls.set(Q, q);
+    flush();
+  }
+  async function flush(){
+    if (!cfg || busy) return;
+    const q = ls.get(Q, []);
+    if (!q.length){ idle(); return; }
+    busy = true;
+    status("กำลังส่งขึ้น Google Sheet…");
+    let ok = false;
+    try {
+      await call({ops: q.map(({seq, ...op}) => op)});
+      const sent = new Set(q.map(o => o.seq));
+      ls.set(Q, ls.get(Q, []).filter(o => !sent.has(o.seq)));
+      ok = true;
+    } catch (err){ status(`ยังส่งขึ้น Google Sheet ไม่ได้: ${err.message}`, true); }
+    finally { busy = false; }
+    if (ok){ if (ls.get(Q, []).length) flush(); else idle(); }
+  }
+  async function pull(){
+    if (!cfg) return;
+    await flush();
+    if (ls.get(Q, []).length || busy) return;
+    try { const j = await call({ops: [], list: true}); write(j.entries); idle(); }
+    catch (err){ status(`โหลดจาก Google Sheet ไม่ได้: ${err.message} (ใช้ข้อมูลในเครื่องไปก่อน)`, true); }
+  }
+
+  store = {
+    kind: "local",
+    subscribe(fn){ subs.push(fn); fn(read()); },
+    async save(id, data){ const l = read(); const e = {...data, id}; const i = l.findIndex(x => x.id === id); if (i >= 0) l[i] = e; else l.push(e); write(l); enqueue({op:"put", entry:e}); },
+    async remove(id){ write(read().filter(e => e.id !== id)); enqueue({op:"del", id}); },
+    replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:list}); },
+    newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+  };
   store.subscribe(list => { entries = list; render(); });
+
+  // settings panel
+  function showCfg(){
+    $("syncUrl").value = cfg?.url || ""; $("syncKey").value = cfg?.key || "";
+    $("syncOff").hidden = !cfg; $("syncPush").hidden = !cfg; $("syncOn").textContent = cfg ? "บันทึกการตั้งค่า" : "เชื่อมต่อ";
+  }
+  $("syncOn").addEventListener("click", async () => {
+    const c = {url: $("syncUrl").value.trim(), key: $("syncKey").value.trim()};
+    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(c.url) || !c.key){ status("ใส่ลิงก์ Web app (ขึ้นต้นด้วย https://script.google.com/) และรหัสลับให้ครบ", true); return; }
+    $("syncOn").disabled = true; status("กำลังเชื่อมต่อ…");
+    try {
+      const j = await call({ops: [], list: true}, c);
+      cfg = c; ls.set(CFG, cfg);
+      const local = read();
+      if (!j.entries.length && local.length){
+        ls.set(Q, []); enqueue({op:"replaceAll", entries: local});
+        status(`เชื่อมต่อแล้ว กำลังส่งข้อมูลในเครื่อง ${local.length} รายการขึ้นชีต…`);
+      } else {
+        ls.set(Q, []); write(j.entries);
+        status(`เชื่อมต่อแล้ว โหลดจาก Google Sheet ${j.entries.length} รายการ`);
+      }
+      showCfg();
+    } catch (err){ status(`เชื่อมต่อไม่สำเร็จ: ${err.message}`, true); }
+    finally { $("syncOn").disabled = false; }
+  });
+  $("syncOff").addEventListener("click", () => {
+    cfg = null; ls.del(CFG); ls.del(Q); showCfg(); idle();
+  });
+  let pushArmed = false;
+  $("syncPush").addEventListener("click", () => {
+    if (!pushArmed){ pushArmed = true; $("syncPush").textContent = `กดอีกครั้งเพื่อยืนยัน (ข้อมูลในชีตจะถูกแทนที่ด้วย ${read().length} รายการในเครื่องนี้)`; return; }
+    pushArmed = false; $("syncPush").textContent = "ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่ของในชีต)";
+    enqueue({op:"replaceAll", entries: read()});
+  });
+
+  showCfg(); idle(); pull();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pull(); });
+  window.addEventListener("online", flush);
 }
 
 /* ---------- derived numbers ---------- */
@@ -308,10 +490,30 @@ function sums(list){
 function thaiDate(iso){ const [y,m,d] = iso.split("-").map(Number); return `${d} ${TH_ABBR[m-1]} ${y}`; }
 
 /* ---------- render ---------- */
+function bizList(){
+  const s = new Set(DEFAULT_BIZ);
+  entries.forEach(e => { if (e.kind !== "saving") s.add(bizOf(e)); });
+  return [...s];
+}
+function renderBizChips(){
+  const box = $("bizChips"); box.textContent = "";
+  for (const b of ["all", ...bizList()]){
+    const c = document.createElement("button");
+    c.type = "button"; c.className = "chip";
+    c.textContent = b === "all" ? "ทุกบัญชี" : bizLabel(b);
+    c.setAttribute("aria-pressed", String(b === bizFilter));
+    c.addEventListener("click", () => { bizFilter = b; if (b !== "all" && !editingId && kind !== "saving"){ setPick(pk.biz, b); fillNames(""); fillNotes(""); } render(); });
+    box.append(c);
+  }
+}
+
 function render(){
   const [y, m] = curYM.split("-").map(Number);
   $("monthLabel").textContent = `${TH_MONTHS[m-1]} ${y}`;
-  const month = entries.filter(e => e.date && ymOf(e.date) === curYM);
+  renderBizChips();
+  const scoped = bizFilter === "all" ? entries : entries.filter(e => bizOf(e) === bizFilter);
+  const allMonth = entries.filter(e => e.date && ymOf(e.date) === curYM);
+  const month = scoped.filter(e => e.date && ymOf(e.date) === curYM);
   const s = sums(month);
   $("tInc").textContent = fmt(s.inc);
   $("tExp").textContent = fmt(s.exp);
@@ -329,7 +531,9 @@ function render(){
   if (!rows.length){
     const tr = document.createElement("tr"); const td = document.createElement("td");
     td.colSpan = 5; td.className = "empty";
-    td.textContent = entries.length ? "เดือนนี้ยังไม่มีรายการ เพิ่มได้จากฟอร์มด้านซ้าย" : "ยังไม่มีข้อมูล เริ่มบันทึกรายการแรกจากฟอร์ม หรือนำเข้าจาก Google Sheet";
+    td.textContent = !entries.length ? "ยังไม่มีข้อมูล เริ่มบันทึกรายการแรกจากฟอร์ม หรือนำเข้าจาก Google Sheet"
+      : bizFilter !== "all" ? `เดือนนี้ยังไม่มีรายการของ ${bizLabel(bizFilter)}`
+      : "เดือนนี้ยังไม่มีรายการ เพิ่มได้จากฟอร์มด้านซ้าย";
     tr.append(td); tb.append(tr);
   }
   for (const e of rows){
@@ -347,7 +551,11 @@ function render(){
     ];
     cells.forEach(([txt, cls], i) => {
       const td = document.createElement("td"); td.className = cls;
-      if (i===1){ const p = document.createElement("span"); p.className = "pill " + e.kind; p.textContent = KIND_LABEL[e.kind]; td.append(p); }
+      if (i===1){
+        const p = document.createElement("span"); p.className = "pill " + e.kind; p.textContent = KIND_LABEL[e.kind]; td.append(p);
+        const b = bizOf(e);
+        if (b !== PERSONAL && bizFilter === "all"){ const t = document.createElement("span"); t.className = "tag"; t.textContent = b; td.append(t); }
+      }
       else td.textContent = txt;
       tr.append(td);
     });
@@ -356,27 +564,53 @@ function render(){
     tb.append(tr);
   }
 
-  // expense by category
+  // income and expense per shop, this month
+  const per = {};
+  allMonth.forEach(e => {
+    if (e.kind === "saving") return;
+    const b = bizOf(e); per[b] = per[b] || {inc:0, exp:0};
+    if (e.kind === "income") per[b].inc += Number(e.amount)||0; else per[b].exp += Number(e.amount)||0;
+  });
+  const bb = $("bizBody"); bb.textContent = "";
+  $("bizWrap").hidden = bizFilter !== "all" || !Object.keys(per).length;
+  for (const b of bizList().filter(b => per[b])){
+    const v = per[b], net = v.inc - v.exp;
+    const tr = document.createElement("tr");
+    [[bizLabel(b),""],[fmt(v.inc),"amt num"],[fmt(v.exp),"amt num"],[fmt(net),"amt num" + (net < 0 ? " neg" : "")]].forEach(([t,c]) => {
+      const td = document.createElement("td"); td.className = c; td.textContent = t; tr.append(td);
+    });
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", () => { bizFilter = b; render(); });
+    bb.append(tr);
+  }
+
+  // expense by category (for a shop: by item detail)
+  const shop = bizFilter !== "all" && bizFilter !== PERSONAL;
+  $("catTitle").textContent = shop ? "ค่าใช้จ่ายแยกตามรายละเอียด" : "ค่าใช้จ่ายแยกตามหมวด";
   const byCat = {};
-  month.filter(e => e.kind==="expense").forEach(e => { const k = e.name || "อื่นๆ"; byCat[k] = (byCat[k]||0) + (Number(e.amount)||0); });
-  const cats = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
-  const max = cats.length ? cats[0][1] : 0;
+  month.filter(e => e.kind==="expense").forEach(e => { const k = (shop ? e.note || e.name : e.name) || "อื่นๆ"; byCat[k] = (byCat[k]||0) + (Number(e.amount)||0); });
+  let cats = Object.entries(byCat).sort((a,b) => b[1]-a[1]);
+  if (cats.length > 12){
+    const rest = cats.slice(11);
+    cats = [...cats.slice(0,11), [`อื่นๆ อีก ${rest.length} รายการ`, rest.reduce((a,c) => a + c[1], 0)]];
+  }
+  const max = cats.length ? Math.max(...cats.map(c => c[1])) : 0;
   const bars = $("catBars"); bars.textContent = "";
   $("catWrap").hidden = !cats.length;
   for (const [name, v] of cats){
     const row = document.createElement("div"); row.className = "bar";
     const n = document.createElement("span"); n.className = "name"; n.textContent = name; n.title = name;
     const t = document.createElement("div"); t.className = "track";
-    const f = document.createElement("div"); f.className = "fill"; f.style.width = (max ? v/max*100 : 0) + "%";
+    const f = document.createElement("div"); f.className = "fill"; f.style.width = (max > 0 ? Math.max(0, v)/max*100 : 0) + "%";
     t.append(f);
     const val = document.createElement("span"); val.className = "num"; val.textContent = `${fmt(v)} (${(s.exp ? v/s.exp*100 : 0).toFixed(0)}%)`;
     row.append(n, t, val); bars.append(row);
   }
 
   // year summary
-  $("yearTitle").textContent = `สรุปปี ${y}`;
+  $("yearTitle").textContent = `สรุปปี ${y}` + (bizFilter !== "all" ? ` · ${bizLabel(bizFilter)}` : "");
   const yb = $("yearBody"); yb.textContent = "";
-  const yearList = entries.filter(e => e.date && e.date.startsWith(y + "-"));
+  const yearList = scoped.filter(e => e.date && e.date.startsWith(y + "-"));
   for (let i=1; i<=12; i++){
     const ms = sums(yearList.filter(e => Number(e.date.slice(5,7))===i));
     const tr = document.createElement("tr");
@@ -405,27 +639,100 @@ function render(){
   fillLists();
 }
 
+/* ---------- dropdowns: past values, plus "add new" ---------- */
+const pk = {
+  biz:  {sel:$("fBiz"),  inp:$("fBizNew"),  label:bizLabel, newText:"＋ เพิ่มร้าน/กิจการใหม่…"},
+  name: {sel:$("fName"), inp:$("fNameNew"), newText:"＋ เพิ่มชื่อรายการใหม่…"},
+  note: {sel:$("fNote"), inp:$("fNoteNew"), empty:"— ไม่ระบุ —", newText:"＋ เพิ่มรายละเอียดใหม่…"}
+};
+function opt(v, t){ const o = document.createElement("option"); o.value = v; o.textContent = t; return o; }
+function pickVal(p){ return p.sel.value === NEW ? p.inp.value.trim() : p.sel.value; }
+function setPick(p, v){
+  v = v || "";
+  if (!v && p.empty == null){ p.sel.selectedIndex = 0; }
+  else {
+    if (v && ![...p.sel.options].some(o => o.value === v)) p.sel.insertBefore(opt(v, (p.label || String)(v)), p.sel.lastElementChild);
+    p.sel.value = v;
+  }
+  p.inp.hidden = true; p.inp.value = "";
+}
+// keep === undefined keeps whatever is chosen now, including a new value being typed.
+function fillPick(p, groups, keep){
+  const typing = keep === undefined && p.sel.value === NEW, typed = p.inp.value;
+  const cur = keep === undefined ? pickVal(p) : keep;
+  p.sel.textContent = "";
+  if (p.empty != null) p.sel.append(opt("", p.empty));
+  for (const g of groups){
+    const vals = g.values.filter(Boolean);
+    if (!vals.length) continue;
+    const parent = g.label ? document.createElement("optgroup") : p.sel;
+    if (g.label) parent.label = g.label;
+    vals.forEach(v => parent.append(opt(v, (p.label || String)(v))));
+    if (g.label) p.sel.append(parent);
+  }
+  p.sel.append(opt(NEW, p.newText));
+  if (typing){ p.sel.value = NEW; p.inp.hidden = false; p.inp.value = typed; return; }
+  setPick(p, cur);
+}
+function freq(list, key){
+  const c = new Map();
+  list.forEach(e => { const v = key(e); if (v) c.set(v, (c.get(v)||0) + 1); });
+  return [...c.entries()].sort((a,b) => b[1]-a[1]).map(x => x[0]);
+}
+const curBiz = () => kind === "saving" ? PERSONAL : (pickVal(pk.biz) || PERSONAL);
+function fillBiz(keep){ fillPick(pk.biz, [{values: bizList()}], keep); }
+function fillNames(keep){
+  const b = curBiz();
+  const used = freq(entries.filter(e => e.kind === kind && bizOf(e) === b), e => e.name);
+  const defaults = (b === PERSONAL || kind === "saving") ? DEFAULT_NAMES[kind] : SHOP_NAMES[kind];
+  fillPick(pk.name, [{values: [...used, ...defaults.filter(d => !used.includes(d))]}], keep);
+}
+function fillNotes(keep){
+  const b = curBiz(), n = pickVal(pk.name);
+  const rel = entries.filter(e => e.kind === kind && bizOf(e) === b && (e.name || "") === n);
+  const byUse = freq(rel, e => e.note);
+  const groups = byUse.length > 12
+    ? [{label:"ใช้บ่อย", values: byUse.slice(0, 10)}, {label:"ทั้งหมด (ก-ฮ)", values: [...byUse].sort((x,y) => x.localeCompare(y, "th"))}]
+    : [{values: byUse}];
+  fillPick(pk.note, groups, keep);
+}
 function fillLists(){
-  const names = new Set(DEFAULT_NAMES[kind]);
-  entries.forEach(e => { if (e.kind===kind && e.name) names.add(e.name); });
-  const dl = $("nameList"); dl.textContent = "";
-  names.forEach(n => { const o = document.createElement("option"); o.value = n; dl.append(o); });
+  fillBiz(); fillNames(); fillNotes();
   const groups = new Set(DEFAULT_GROUPS);
   entries.forEach(e => { if (e.group) groups.add(e.group); });
   const gl = $("groupList"); gl.textContent = "";
   groups.forEach(n => { const o = document.createElement("option"); o.value = n; gl.append(o); });
 }
+function onPick(p, fn){
+  p.sel.addEventListener("change", () => {
+    const isNew = p.sel.value === NEW;
+    p.inp.hidden = !isNew; if (isNew){ p.inp.value = ""; p.inp.focus(); }
+    fn && fn();
+  });
+}
+onPick(pk.biz, () => { fillNames(""); fillNotes(""); });
+onPick(pk.name, () => fillNotes(""));
+onPick(pk.note, () => {
+  // Same item as before: start from the price paid last time.
+  const n = pickVal(pk.note);
+  if (kind !== "expense" || !n || editingId) return;
+  const last = entries.filter(e => e.kind === "expense" && e.note === n && e.unitPrice > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
+  if (last){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; updateAmountFromUnit(); }
+});
 
 /* ---------- form ---------- */
 function setKind(k){
+  const changed = k !== kind;
   kind = k;
   document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k===k)));
   $("unitRow").hidden = k !== "expense";
   $("savRow").hidden = k !== "saving";
   $("noteField").hidden = k === "saving";
+  $("bizField").hidden = k === "saving";
   $("fNameLabel").textContent = k === "saving" ? "ชื่อรายการ (แอป/บัญชี)" : "ชื่อรายการ";
-  $("fName").placeholder = k==="income" ? "เช่น เงินเดือน" : k==="saving" ? "เช่น Dime!" : "เช่น ค่าอาหาร";
-  fillLists();
+  fillBiz();
+  fillNames(changed ? "" : undefined);
+  fillNotes(changed ? "" : undefined);
 }
 document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => setKind(b.dataset.k)));
 
@@ -438,9 +745,12 @@ $("fQty").addEventListener("input", updateAmountFromUnit);
 
 function resetForm(keepDate){
   const d = keepDate ? $("fDate").value : defaultDate();
+  const b = pickVal(pk.biz), n = pickVal(pk.name);
   $("entryForm").reset();
   $("fDate").value = d;
   editingId = null;
+  // Keep shop and name so several items from one bill go in quickly.
+  fillBiz(b); fillNames(n); fillNotes("");
   $("formTitle").textContent = "เพิ่มรายการ";
   $("saveBtn").textContent = "บันทึก";
   $("cancelEdit").hidden = true;
@@ -453,8 +763,9 @@ function startEdit(id){
   const e = entries.find(x => x.id === id); if (!e) return;
   editingId = id;
   setKind(e.kind);
-  $("fDate").value = e.date; $("fAmount").value = e.amount; $("fName").value = e.name || "";
-  $("fNote").value = e.note || ""; $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
+  fillBiz(bizOf(e)); fillNames(e.name || ""); fillNotes(e.note || "");
+  $("fDate").value = e.date; $("fAmount").value = e.amount;
+  $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
   $("fSide").value = e.side || "ซื้อ"; $("fGroup").value = e.group || "";
   $("formTitle").textContent = "แก้ไขรายการ";
   $("saveBtn").textContent = "บันทึกการแก้ไข";
@@ -480,10 +791,10 @@ $("entryForm").addEventListener("submit", async ev => {
   ev.preventDefault();
   const amount = Math.round(parseFloat($("fAmount").value) * 100) / 100;
   const date = $("fDate").value;
-  const name = $("fName").value.trim();
+  const name = pickVal(pk.name);
   if (!date || !(amount >= 0) || !name){ toast("กรอกวันที่ ชื่อรายการ และจำนวนเงินให้ครบ", true); return; }
-  const data = {kind, date, ym: ymOf(date), name, amount, updatedAt: new Date().toISOString()};
-  if (kind !== "saving") data.note = $("fNote").value.trim();
+  const data = {kind, date, ym: ymOf(date), name, amount, biz: curBiz(), updatedAt: new Date().toISOString()};
+  if (kind !== "saving") data.note = pickVal(pk.note);
   if (kind === "expense"){ const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value); if (u>0) data.unitPrice = u; if (q>0) data.qty = q; }
   if (kind === "saving"){ data.side = $("fSide").value; data.group = $("fGroup").value.trim(); }
   const id = editingId || store.newId();
@@ -494,19 +805,163 @@ $("entryForm").addEventListener("submit", async ev => {
     if (ymOf(date) !== curYM) curYM = ymOf(date);
     resetForm(true);
     render();
-    $("fName").focus();
   } catch (err){
     toast("บันทึกไม่สำเร็จ: " + (err?.code === "quota_exceeded" ? "พื้นที่เก็บข้อมูลเต็ม" : (err?.message || "ลองใหม่อีกครั้ง")), true);
   } finally { $("saveBtn").disabled = false; }
 });
 
+/* ---------- photo of a receipt or slip ---------- */
+let snapRes = null;
+function snapMsg(msg, bad){ $("snapMsg").textContent = msg; $("snapMsg").style.color = bad ? "var(--exp)" : "var(--muted)"; }
+async function onSnapFile(ev){
+  const f = ev.target.files[0]; ev.target.value = "";
+  if (!f || !readReceipt) return;
+  $("snapItemsWrap").hidden = true; $("snapTextWrap").hidden = true;
+  document.querySelectorAll(".snap label").forEach(l => l.style.pointerEvents = "none");
+  snapMsg("กำลังอ่านรูป…");
+  try {
+    const r = await readReceipt(f, snapMsg);
+    applyReceipt(r);
+  } catch (err){
+    snapMsg(err?.userMessage || "อ่านรูปไม่สำเร็จ ลองถ่ายใหม่ให้เห็นตัวเลขชัดๆ", true);
+  } finally {
+    document.querySelectorAll(".snap label").forEach(l => l.style.pointerEvents = "");
+  }
+}
+$("snapCam").addEventListener("change", onSnapFile);
+$("snapPick").addEventListener("change", onSnapFile);
+
+function applyReceipt(r){
+  r = r || {};
+  if (r.text){ $("snapText").textContent = r.text; $("snapTextWrap").hidden = false; }
+  if (editingId) resetForm(true);
+  setKind(r.kind === "income" ? "income" : "expense");
+  if (r.biz) fillBiz(String(r.biz));
+  fillNames(r.name ? String(r.name) : "");
+  fillNotes(r.note ? String(r.note) : "");
+  const d = parseDate(r.date || "");
+  if (d){ $("fDate").value = d; }
+  $("fUnit").value = ""; $("fQty").value = "";
+  const amt = parseAmt(r.amount);
+  if (isFinite(amt) && amt > 0) $("fAmount").value = amt.toFixed(2);
+  const items = (Array.isArray(r.items) ? r.items : []).map(it => ({note: String(it.note || "").trim(), unitPrice: parseAmt(it.unitPrice), qty: parseAmt(it.qty), amount: parseAmt(it.amount)}))
+    .filter(it => it.note && isFinite(it.amount));
+  if (items.length === 1){
+    const it = items[0];
+    fillNotes(it.note);
+    if (it.unitPrice > 0) $("fUnit").value = it.unitPrice;
+    if (it.qty > 0) $("fQty").value = it.qty;
+  }
+  snapRes = items.length > 1 ? items : null;
+  $("snapItemsWrap").hidden = !snapRes;
+  if (snapRes){
+    const sum = items.reduce((a, it) => a + it.amount, 0);
+    $("snapItemsHead").textContent = `ใบเสร็จนี้มี ${items.length} รายการ รวม ${fmt(sum)} บาท เลือกบันทึกแยกทีละรายการ หรือใช้ยอดรวมเป็นรายการเดียว`;
+    const box = $("snapItems"); box.textContent = "";
+    items.forEach((it, i) => {
+      const row = document.createElement("label"); row.className = "snapitem";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = true; cb.dataset.i = i;
+      const n = document.createElement("span"); n.textContent = it.note + (it.qty > 0 && it.unitPrice > 0 ? ` (${fmt(it.unitPrice)} × ${it.qty})` : "");
+      const a = document.createElement("span"); a.className = "num"; a.textContent = fmt(it.amount);
+      row.append(cb, n, a); box.append(row);
+    });
+  }
+  const found = [d && "วันที่", isFinite(amt) && amt > 0 && "จำนวนเงิน", r.name && "ชื่อรายการ"].filter(Boolean);
+  snapMsg(found.length ? `กรอก${found.join(" ")}ให้แล้ว ตรวจให้ถูกต้องแล้วกดบันทึก` : "ไม่พบตัวเลขที่ชัดเจนในรูป กรอกเองได้เลย", !found.length);
+  $("fAmount").focus();
+}
+$("snapUseTotal").addEventListener("click", () => { $("snapItemsWrap").hidden = true; snapRes = null; snapMsg("ใช้ยอดรวมแล้ว ตรวจแล้วกดบันทึก"); });
+$("snapSaveAll").addEventListener("click", async () => {
+  if (!snapRes) return;
+  const pickIdx = [...$("snapItems").querySelectorAll("input:checked")].map(c => +c.dataset.i);
+  const date = $("fDate").value, name = pickVal(pk.name);
+  if (!pickIdx.length || !date || !name){ snapMsg("เลือกอย่างน้อยหนึ่งรายการ และกรอกวันที่กับชื่อรายการก่อน", true); return; }
+  const btn = $("snapSaveAll"); btn.disabled = true;
+  let done = 0;
+  try {
+    for (const i of pickIdx){
+      const it = snapRes[i];
+      const e = {kind, date, ym: ymOf(date), name, biz: curBiz(), note: it.note, amount: Math.round(it.amount * 100) / 100, updatedAt: new Date().toISOString()};
+      if (kind === "expense"){ if (it.unitPrice > 0) e.unitPrice = it.unitPrice; if (it.qty > 0) e.qty = it.qty; }
+      await store.save(store.newId(), e); done++;
+    }
+    snapMsg(`บันทึก ${done} รายการแล้ว`);
+    $("snapItemsWrap").hidden = true; snapRes = null;
+    if (ymOf(date) !== curYM) curYM = ymOf(date);
+    resetForm(true); render();
+  } catch (err){
+    snapMsg(`บันทึกได้ ${done} รายการแล้วหยุด: ${err?.message || "ลองใหม่อีกครั้ง"}`, true);
+    snapRes = snapRes.filter((_, i) => !pickIdx.slice(0, done).includes(i));
+  } finally { btn.disabled = false; }
+});
+
+/* RECEIPT-READER-START */
+// Without Claude: read the photo on this device with Tesseract OCR (Thai + English),
+// then pick out the date and the total. Item names are not understood, only numbers.
+let readReceipt = null;
+function loadScript(src){
+  return new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.head.append(s); });
+}
+let ocrWorker = null;
+function parseReceiptText(text){
+  const lines = text.split(/\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const nums = l => (l.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+\.\d{2}|\d+/g) || []).map(x => parseFloat(x.replace(/,/g, ""))).filter(v => v > 0 && v < 10000000);
+  let amount = NaN;
+  const keys = [/ยอดสุทธิ|รวมทั้งสิ้น|grand\s*total|net\s*total/i, /ยอดรวม|รวมเงิน|total/i, /จำนวนเงิน|จํานวนเงิน|amount|ยอดชำระ|ยอดโอน/i, /รวม/];
+  for (const k of keys){
+    for (let i = 0; i < lines.length && !isFinite(amount); i++){
+      if (!k.test(lines[i])) continue;
+      const own = nums(lines[i].replace(/\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/g, "")), next = nums(lines[i+1] || "");
+      const pool = own.length ? own : next;
+      if (pool.length) amount = pool[pool.length - 1];
+    }
+    if (isFinite(amount)) break;
+  }
+  if (!isFinite(amount)){
+    const dec = lines.flatMap(l => (l.match(/\d{1,3}(?:,\d{3})*\.\d{2}/g) || []).map(x => parseFloat(x.replace(/,/g, ""))));
+    if (dec.length) amount = Math.max(...dec);
+  }
+  let date = "";
+  const fixY = y => { y = +y; if (y < 100) y = y > 40 ? 2500 + y : 2000 + y; if (y > 2400) y -= 543; return y; };
+  const ok = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(m)}-${pad(d)}` : "";
+  for (const l of lines){
+    let m = l.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (m && (date = ok(fixY(m[3]), +m[2], +m[1]))) break;
+    m = l.match(/(\d{1,2})\s*([ก-๙]{1,3}\.?\s?[ก-๙]{1,2}\.?)\s*(\d{2,4})/);
+    if (m){ const mo = TH_ABBR.findIndex(a => a.replace(/\./g, "") === m[2].replace(/[.\s]/g, "")) + 1; if (mo && (date = ok(fixY(m[3]), mo, +m[1]))) break; }
+    m = l.match(/(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*(\d{2,4})/i);
+    if (m){ const mo = "janfebmaraprmayjunjulaugsepoctnovdec".indexOf(m[2].slice(0,3).toLowerCase()) / 3 + 1; if (date = ok(fixY(m[3]), mo, +m[1])) break; }
+  }
+  return {kind: "expense", date, amount: isFinite(amount) ? amount : "", text};
+}
+async function initReceiptReader(){
+  readReceipt = async (file, progress) => {
+    try {
+      if (!window.Tesseract){
+        progress("กำลังโหลดตัวอ่านภาษาไทย (ครั้งแรกใช้เวลาสักครู่)…");
+        await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+      }
+      if (!ocrWorker) ocrWorker = await Tesseract.createWorker(["tha", "eng"], 1, {
+        logger: m => { if (m.status === "recognizing text") progress(`กำลังอ่านตัวอักษร ${Math.round(m.progress * 100)}%`); }
+      });
+      const { data } = await ocrWorker.recognize(file);
+      return parseReceiptText(data.text || "");
+    } catch (err){
+      throw {userMessage: navigator.onLine === false ? "ครั้งแรกต้องต่ออินเทอร์เน็ตเพื่อโหลดตัวอ่าน" : "อ่านรูปไม่สำเร็จ ลองถ่ายใหม่ให้เห็นตัวเลขชัดๆ"};
+    }
+  };
+  $("snapHint").textContent = "ถ่ายรูปใบเสร็จหรือสลิป ระบบจะอ่านวันที่และยอดเงินให้ (อ่านในเครื่อง ไม่ส่งรูปไปไหน) ส่วนชื่อรายการเลือกเอง";
+  $("snapBox").hidden = false;
+}
+/* RECEIPT-READER-END */
+
 /* ---------- month nav & filters ---------- */
 function shiftMonth(d){ let [y,m] = curYM.split("-").map(Number); m += d; if (m<1){m=12;y--;} if (m>12){m=1;y++;} curYM = `${y}-${pad(m)}`; if (!editingId) $("fDate").value = defaultDate(); render(); }
 $("prevM").addEventListener("click", () => shiftMonth(-1));
 $("nextM").addEventListener("click", () => shiftMonth(1));
-document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => {
+document.querySelectorAll(".chip[data-f]").forEach(c => c.addEventListener("click", () => {
   filter = c.dataset.f;
-  document.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", String(x===c)));
+  document.querySelectorAll(".chip[data-f]").forEach(x => x.setAttribute("aria-pressed", String(x===c)));
   render();
 }));
 
@@ -575,9 +1030,9 @@ $("impGo").addEventListener("click", async () => {
 /* ---------- export ---------- */
 $("exportBtn").addEventListener("click", async () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-  const head = ["วันที่","ประเภท","ชื่อรายการ","จำนวนเงิน","รายละเอียดอื่นๆ","ราคาต่อชิ้น","จำนวนชิ้น","ซื้อ/ขาย","กลุ่ม","Year-Month"];
+  const head = ["วันที่","ประเภท","ชื่อรายการ","จำนวนเงิน","รายละเอียดอื่นๆ","ราคาต่อชิ้น","จำนวนชิ้น","ซื้อ/ขาย","กลุ่ม","Year-Month","ร้าน/กิจการ"];
   const rows = [...entries].sort((a,b) => a.date < b.date ? -1 : 1).map(e =>
-    [e.date, KIND_LABEL[e.kind], e.name, e.amount, e.note, e.unitPrice, e.qty, e.side, e.group, e.ym].map(esc).join(","));
+    [e.date, KIND_LABEL[e.kind], e.name, e.amount, e.note, e.unitPrice, e.qty, e.side, e.group, e.ym, bizOf(e)].map(esc).join(","));
   const csv = "﻿" + [head.join(","), ...rows].join("\n");
   const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
   const a = document.createElement("a");
@@ -607,10 +1062,11 @@ $("restoreFile").addEventListener("change", async ev => {
   const rows = parseCSV((await f.text()).replace(/^\ufeff/, ""));
   const KIND_BY_LABEL = Object.fromEntries(Object.entries(KIND_LABEL).map(([k,v]) => [v,k]));
   restoreRows = rows.slice(1).map(r => {
-    const [date, label, name, amount, note, unitPrice, qty, side, group] = r;
+    const [date, label, name, amount, note, unitPrice, qty, side, group, , biz] = r;
     const k = KIND_BY_LABEL[label]; const d = parseDate(date); const a = parseAmt(amount);
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind:k, date:d, ym:ymOf(d), name:name||"", amount:a, updatedAt:new Date().toISOString()};
+    if (biz) e.biz = biz;
     if (k === "saving"){ e.side = side === "ขาย" ? "ขาย" : "ซื้อ"; e.group = group || ""; }
     else { e.note = note || ""; if (k === "expense"){ if (parseAmt(unitPrice) > 0) e.unitPrice = parseAmt(unitPrice); if (parseAmt(qty) > 0) e.qty = parseAmt(qty); } }
     return e;
@@ -621,8 +1077,7 @@ $("restoreFile").addEventListener("change", async ev => {
 let restoreArmed = false;
 $("restoreGo").addEventListener("click", () => {
   if (!restoreArmed){ restoreArmed = true; $("restoreGo").textContent = `กดอีกครั้งเพื่อยืนยัน (ข้อมูลเดิม ${entries.length} รายการจะถูกแทนที่)`; return; }
-  try { localStorage.setItem("money-book-entries", JSON.stringify(restoreRows.map(e => ({...e, id: store.newId()})))); } catch {}
-  store.subscribe(list => { entries = list; render(); });
+  store.replaceAll(restoreRows.map(e => ({...e, id: store.newId()})));
   $("restoreMsg").textContent = `กู้คืน ${restoreRows.length} รายการแล้ว`;
   $("restoreGo").hidden = true; $("restoreFile").value = ""; restoreRows = [];
 });
@@ -632,6 +1087,7 @@ setKind("expense");
 $("fDate").value = defaultDate();
 render();
 initStore();
+initReceiptReader();
 })();
 </script>
 </body>
