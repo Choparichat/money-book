@@ -134,6 +134,11 @@ tfoot td{font-weight:600;border-top:2px solid var(--fg);border-bottom:0}
 .meter.exp > div{background:var(--exp)}
 .fund{display:grid;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
 .fund:last-child{border-bottom:0}
+fieldset.groups{border:0;padding:0;margin:0}
+fieldset.groups legend{padding:0;margin-bottom:4px}
+#fuGroups{display:flex;flex-wrap:wrap;gap:6px 14px}
+#fuGroups label{display:flex;gap:6px;align-items:center;font-size:.9rem;cursor:pointer}
+#fuGroups input{width:auto;margin:0}
 .fund .h{display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap}
 
 /* forms */
@@ -263,16 +268,17 @@ details summary{cursor:pointer;font-weight:500}
       <form id="fundForm" class="panel" style="background:var(--sunk);border:0" hidden>
         <div class="two">
           <div class="field"><label for="fuName">ชื่อเป้าหมาย</label><input id="fuName" required placeholder="เช่น ไปญี่ปุ่นกับที่รัก"></div>
-          <div class="field"><label for="fuGroup">นับจากกลุ่มออม</label><div class="pick"><select id="fuGroup"></select><input id="fuGroupNew" hidden placeholder="ชื่อกลุ่มใหม่"></div></div>
+          <div class="field"><label for="fuDue">อยากได้ภายใน (เดือน)</label><input id="fuDue" type="month"></div>
         </div>
         <div class="two">
           <div class="field"><label for="fuTarget">เป้าหมาย (บาท)</label><input id="fuTarget" type="number" min="0" step="1" inputmode="numeric" required></div>
-          <div class="field"><label for="fuDue">อยากได้ภายใน (เดือน)</label><input id="fuDue" type="month"></div>
+          <div></div>
         </div>
+        <fieldset class="field groups"><legend>นับยอดจากกลุ่มออม (เลือกได้หลายกลุ่ม)</legend><div id="fuGroups"></div></fieldset>
         <div class="actions"><button class="btn primary" type="submit">บันทึกเป้าหมาย</button><button class="btn" type="button" id="fundCancel">ยกเลิก</button><button class="btn danger" type="button" id="fundDel" hidden>ลบเป้าหมายนี้</button></div>
       </form>
       <div id="sFunds"></div>
-      <div class="hint">ยอดสะสมนับจากรายการ ลงทุน/ออม ที่ตั้ง "กลุ่ม" ตรงกับเป้าหมาย ตั้งแต่อดีตถึงวันนี้ (ซื้อ − ขาย)</div>
+      <div class="hint">ยอดสะสมนับจากรายการ ลงทุน/ออม ที่อยู่ในกลุ่มที่เลือกไว้ในเป้าหมาย ทุกปีตั้งแต่อดีตถึงวันนี้ (ซื้อ − ขาย)</div>
     </div>
     <div class="grid2">
       <div class="panel"><h2>แยกตามกลุ่ม/กองทุน</h2><div id="sPie"></div></div>
@@ -733,7 +739,12 @@ function renderShop(P){
 }
 
 /* ---------- funds (saving goals) ---------- */
-function fundSaved(f){ return entries.filter(e => e.kind === "saving" && e.group === f.group && e.date <= todayISO).reduce((a, e) => a + signedSaving(e), 0); }
+// A goal counts one or more saving groups. Older goals stored a single "group".
+const fundGroups = f => f.groups && f.groups.length ? f.groups : [f.group].filter(Boolean);
+const groupKey = g => String(g || "").replace(/\s+/g, " ").trim();
+function fundRows(f){ const gs = new Set(fundGroups(f).map(groupKey)); return entries.filter(e => e.kind === "saving" && gs.has(groupKey(e.group)) && e.date <= todayISO); }
+function fundSaved(f){ return fundRows(f).reduce((a, e) => a + signedSaving(e), 0); }
+function fundYears(f){ const y = new Map(); fundRows(f).forEach(e => { const k = e.date.slice(0,4); y.set(k, (y.get(k)||0) + signedSaving(e)); }); return [...y.entries()].sort(); }
 function renderFunds(box, compact){
   box.textContent = "";
   const funds = settings.funds || [];
@@ -747,7 +758,8 @@ function renderFunds(box, compact){
     const m = el("div", "meter"); const bar = el("div"); bar.style.width = pct + "%"; m.append(bar);
     m.setAttribute("role", "progressbar"); m.setAttribute("aria-valuenow", pct.toFixed(0)); m.setAttribute("aria-valuemin", "0"); m.setAttribute("aria-valuemax", "100"); m.setAttribute("aria-label", f.name);
     const info = [];
-    info.push(`นับจากกลุ่ม "${f.group}"`);
+    info.push(`นับจากกลุ่ม ${fundGroups(f).map(g => `"${groupKey(g)}"`).join(", ")}`);
+    const yrs = fundYears(f); if (yrs.length) info.push(yrs.map(([y, v]) => `ปี ${y}: ${fmt0(v)}`).join(", "));
     if (target && saved < target){
       info.push(`เหลืออีก ${fmt0(target - saved)} บาท`);
       if (f.due){
@@ -768,7 +780,11 @@ function openFund(f){
   editingFund = f ? f.id : null;
   $("fundForm").hidden = false;
   $("fuName").value = f?.name || ""; $("fuTarget").value = f?.target || ""; $("fuDue").value = f?.due || "";
-  fillPick(pk.fund, [{values: groupList()}], f?.group || "");
+  const box = $("fuGroups"); box.textContent = "";
+  const all = [...new Set(groupList().map(groupKey))];
+  const chosen = new Set((f ? fundGroups(f) : []).map(groupKey));
+  chosen.forEach(g => { if (!all.includes(g)) all.push(g); });
+  all.forEach(g => { const l = el("label"); const c = el("input"); c.type = "checkbox"; c.value = g; c.checked = chosen.has(g); l.append(c, el("span", "", g)); box.append(l); });
   $("fundDel").hidden = !f;
   $("fuName").focus();
 }
@@ -776,7 +792,9 @@ $("fundAdd").addEventListener("click", () => openFund(null));
 $("fundCancel").addEventListener("click", () => { $("fundForm").hidden = true; });
 $("fundForm").addEventListener("submit", ev => {
   ev.preventDefault();
-  const f = {id: editingFund || "f" + Date.now().toString(36), name: $("fuName").value.trim(), group: pickVal(pk.fund) || $("fuName").value.trim(), target: Number($("fuTarget").value)||0, due: $("fuDue").value};
+  const groups = [...$("fuGroups").querySelectorAll("input:checked")].map(c => c.value);
+  if (!groups.length){ $("fuGroups").querySelector("input")?.focus(); return; }
+  const f = {id: editingFund || "f" + Date.now().toString(36), name: $("fuName").value.trim(), group: groups[0], groups, target: Number($("fuTarget").value)||0, due: $("fuDue").value};
   const funds = [...(settings.funds || [])];
   const i = funds.findIndex(x => x.id === f.id);
   if (i >= 0) funds[i] = f; else funds.push(f);
@@ -898,7 +916,7 @@ $("planDefault").addEventListener("click", () => {
 /* ---------- dropdowns: past values plus "add new" ---------- */
 const pk = {};
 [["biz","fBiz","＋ เพิ่มร้าน/กิจการใหม่…"],["name","fName","＋ เพิ่มหมวดใหม่…"],["note","fNote","＋ เพิ่มรายละเอียดใหม่…"],["unit","fUnitName","＋ หน่วยใหม่…"],
- ["shop","fShop","＋ เพิ่มร้านใหม่…"],["group","fGroup","＋ เพิ่มกลุ่มใหม่…"],["acc","fAcc","＋ เพิ่มใหม่…"],["fund","fuGroup","＋ กลุ่มใหม่…"]]
+ ["shop","fShop","＋ เพิ่มร้านใหม่…"],["group","fGroup","＋ เพิ่มกลุ่มใหม่…"],["acc","fAcc","＋ เพิ่มใหม่…"]]
   .forEach(([k, id, t]) => pk[k] = {sel: $(id), inp: $(id + "New"), newText: t});
 pk.biz.label = bizLabel;
 pk.note.empty = "— ไม่ระบุ —"; pk.shop.empty = "— ไม่ระบุ —"; pk.unit.empty = "—"; pk.acc.empty = "— ไม่ระบุ —";
@@ -1021,7 +1039,7 @@ onPick(pk.note, () => {
   if (last.shop) setPick(pk.shop, last.shop);
   updateAmount();
 });
-onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc); onPick(pk.fund);
+onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc);
 $("fPay").addEventListener("change", () => fillAcc(""));
 function updateAmount(){
   const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value);
@@ -1223,6 +1241,15 @@ function initStore(){
   const write = list => { ls.set(KEY, list); subs.forEach(f => f(list)); };
   // Budget plans and saving goals: kept per device and in the sheet's "ตั้งค่าแอป" tab.
   settings = ls.get(SET, null) || {funds: [{id: "fjp", name: "ออมเงินไปญี่ปุ่นกับที่รัก", group: "ออมไปญี่ปุ่น", target: 0, due: ""}]};
+  // The starter Japan goal also counts the other Japan groups used in past years, e.g. "ออมไปญี่ปุ่น (ME)".
+  const widenJapan = () => {
+    const f = (settings.funds || []).find(x => x.id === "fjp" && !x.groups);
+    if (!f) return;
+    const gs = entries.filter(e => e.kind === "saving" && /ญี่ปุ่น/.test(e.group || "")).map(e => String(e.group).replace(/\s+/g, " ").trim());
+    if (!gs.length) return;
+    f.groups = [...new Set([f.group, ...gs])];
+    ls.set(SET, settings); enqueue({op: "setting", key: "funds", value: settings.funds});
+  };
   const writeSettings = (s, local) => { settings = s; ls.set(SET, s); if (!local) render(); };
   // Settings this device changed but the sheet has not stored yet win over the sheet's copy.
   const pendingSettings = () => ls.get(Q, []).filter(o => o.op === "setting").map(o => o.key);
@@ -1303,7 +1330,7 @@ function initStore(){
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
-  store.subscribe(list => { entries = list; render(); });
+  store.subscribe(list => { entries = list; widenJapan(); render(); });
 
   // settings panel
   function showCfg(){
