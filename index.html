@@ -77,7 +77,10 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .hist .gone{opacity:.6;cursor:default}
 .panel.alert{border:2px solid var(--exp);background:color-mix(in srgb,var(--exp) 10%,var(--surface))}
 .panel.alert h2{color:var(--exp)}
-.sa{display:grid;gap:10px}.sa-row{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
+.sa{display:grid;gap:10px}
+.fu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding-top:8px;border-top:1px solid var(--line)}
+.fu-row .fu-open{all:unset;cursor:pointer;display:grid;gap:2px;min-width:0}.fu-row .fu-open:focus-visible{outline:2px solid var(--fg);outline-offset:2px;border-radius:6px}
+.fu-check{margin:4px 0 8px}.sa-row{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
 .sa-n strong{font-weight:600}.sa-f{display:grid;grid-template-columns:minmax(0,1fr) 70px auto auto;gap:6px;align-items:center}
 .sa-f input,.sa-f select{min-width:0;padding:6px 8px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;gap:12px;min-width:0;align-content:start}
@@ -299,6 +302,11 @@ details summary{cursor:pointer;font-weight:500}
 <main>
   <!-- OVERALL -->
   <section class="page" id="page-overall">
+    <div class="panel alert" id="fuAlert" hidden>
+      <h2 id="fuAlertTitle"></h2>
+      <p class="hint" style="margin:0">รายการที่ติ๊ก "เตือนให้กลับมาเช็ค" ไว้ แตะเพื่อเปิดแล้วเติมรายละเอียด เติมเสร็จกด "เช็คแล้ว" ได้เลย</p>
+      <div id="fuAlertList" class="sa"></div>
+    </div>
     <div class="panel alert" id="sizeAlert" hidden>
       <h2 id="sizeAlertTitle"></h2>
       <p class="hint" style="margin:0">ใส่น้ำหนักหรือปริมาณต่อ 1 หน่วยที่ซื้อ (เช่น อัญชัน 1 ถุง = 100 g) เพื่อคิดต้นทุนต่อกรัม ใส่ครั้งเดียว แอปจำให้ทุกครั้งที่ซื้อของนี้ ถ้าจำไม่ได้ ไว้ชั่งแล้วค่อยมาใส่</p>
@@ -543,6 +551,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
+    <label class="check fu-check"><input type="checkbox" id="fFollow"> ⏰ เตือนที่หน้า Overall ให้กลับมาเช็ครายการนี้ (จำไม่ได้ว่าเป็นค่าอะไร ไว้เติมทีหลัง)</label>
     <div class="bill" id="billBox" hidden>
       <div class="bill-head"><strong id="billTitle">บิลนี้</strong><span class="hint" id="billInfo"></span></div>
       <div id="billItems"></div>
@@ -921,6 +930,28 @@ function needSize(){
   }
   return [...byNote.values()].filter(v => !v.sized && v.last.date >= since).sort((a, b) => a.last.date < b.last.date ? 1 : -1);
 }
+// Entries the user flagged to come back to (e.g. income they can't place yet). Kept in synced settings.
+const fuIds = () => settings.followUp || [];
+function setFollow(ids, on){
+  const s = new Set(fuIds()), before = s.size;
+  ids.forEach(id => on ? s.add(id) : s.delete(id));
+  if (s.size !== before) store.setSetting("followUp", [...s]);
+}
+function renderFollowAlert(){
+  const box = $("fuAlert"), list = fuIds().map(id => allEntries.find(e => e.id === id)).filter(Boolean).sort((a, b) => a.date < b.date ? -1 : 1);
+  box.hidden = !list.length; if (!list.length) return;
+  $("fuAlertTitle").textContent = `⏰ รอเช็ครายละเอียด ${list.length} รายการ`;
+  const ul = $("fuAlertList"); ul.textContent = "";
+  list.forEach(e => {
+    const row = el("div", "fu-row");
+    const o = el("button", "fu-open"); o.type = "button";
+    o.append(el("strong", "", `${KIND_LABEL[e.kind] || ""} ${fmt(e.amount)} บาท`), el("span", "hint", `วันที่ ${thaiDate(e.date)}${e.time ? " " + e.time + " น." : ""} · ${e.name || "ไม่ระบุหมวด"}${e.note ? " · " + e.note : " · ยังไม่มีรายละเอียด"}${e.payer ? " · จาก " + e.payer : ""}${payText(e) ? " · " + payText(e) : ""}`));
+    o.addEventListener("click", () => openForm(e));
+    const ok = el("button", "btn sm", "เช็คแล้ว"); ok.type = "button";
+    ok.addEventListener("click", () => setFollow([e.id], false));
+    row.append(o, ok); ul.append(row);
+  });
+}
 function renderSizeAlert(){
   const box = $("sizeAlert"), list = needSize();
   box.hidden = !list.length; if (!list.length) return;
@@ -941,7 +972,7 @@ function renderSizeAlert(){
   if (list.length > 8) ul.append(el("div", "hint", `และอีก ${list.length - 8} รายการ ใส่ชุดนี้ก่อน แล้วรายการที่เหลือจะขึ้นมาแทน`));
 }
 function renderOverall(P){
-  renderSizeAlert();
+  renderFollowAlert(); renderSizeAlert();
   const cy = calYM(); $("oCalTitle").textContent = `ปฏิทิน ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("oCal"), cy, pickDay);
   const s = sums(P);
@@ -1719,7 +1750,8 @@ function openForm(e){
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
     setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || "";
-    if (e.src === "sheet") $("incRow").hidden = true; // rows typed in the sheet's year tab have no time/name columns
+    if (e.src === "sheet") $("incRow").hidden = true;
+    $("fFollow").checked = fuIds().includes(e.id); // rows typed in the sheet's year tab have no time/name columns
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
     if (e.pay) $("fPay").value = e.pay;
@@ -1783,7 +1815,7 @@ $("entryForm").addEventListener("submit", async ev => {
     if (kind === "saving"){ upd.side = base.side; upd.group = base.group; }
     else { upd.note = base.note || ""; if (base.unitPrice) upd.unitPrice = base.unitPrice; if (base.qty) upd.qty = base.qty; }
     if (base.size){ upd.size = base.size; upd.sizeUnit = base.sizeUnit; } else { delete upd.size; delete upd.sizeUnit; }
-    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -1806,6 +1838,7 @@ $("entryForm").addEventListener("submit", async ev => {
   try {
     await store.save(out);
     rememberSizes(out);
+    const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
     if (editing){ $("dlg").close(); return; }
     const where = `${name}${base.note ? " · " + base.note : ""} วันที่ ${thaiDate(date)}`;
     const away = !inPeriod(out[0]) ? ` (อยู่${mode === "month" ? `เดือน ${TH_MONTHS[+date.slice(5,7) - 1]} ${date.slice(0,4)}` : `ปี ${date.slice(0,4)}`} ไม่ใช่ช่วงที่เปิดดูอยู่)` : "";
@@ -1947,6 +1980,7 @@ $("billSave").addEventListener("click", async () => {
   try {
     await store.save(out);
     rememberSizes(out);
+    if ($("fFollow").checked){ setFollow(out.map(x => x.id), true); $("fFollow").checked = false; }
     if (oldIds.length) await store.remove(oldIds);
     if (billEdit){ bill = []; billSlot = null; billEdit = null; $("dlg").close(); return; }
     toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
