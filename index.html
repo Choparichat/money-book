@@ -2139,8 +2139,12 @@ function initStore(){
     del(k){ try { localStorage.removeItem(k); } catch {} }
   };
   const subs = [];
-  const read = () => ls.get(KEY, []);
-  const write = list => { ls.set(KEY, list); subs.forEach(f => f(list)); };
+  // Text the sheet once turned into a date shows up as "Sat Nov 07 2026 00:00:00 GMT+0700 (…)"; show it short instead (7-11).
+  const JSDATE = /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT/;
+  const TEXTF = ["note", "name", "group", "biz", "unit", "shop", "pay", "account", "inst", "who", "payer", "sizeUnit", "side"];
+  const clean = e => { for (const k of TEXTF) if (typeof e[k] === "string" && JSDATE.test(e[k])){ const [, mon, day] = e[k].split(" "); e[k] = `${+day}-${"JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(mon) / 3 + 1}`; } return e; };
+  const read = () => ls.get(KEY, []).map(clean);
+  const write = list => { list = list.map(clean); ls.set(KEY, list); subs.forEach(f => f(list)); };
   // Budget plans and saving goals: kept per device and in the sheet's "ตั้งค่าแอป" tab.
   settings = ls.get(SET, null) || {funds: [{id: "fjp", name: "ออมเงินไปญี่ปุ่นกับที่รัก", group: "ออมไปญี่ปุ่น", target: 0, due: ""}]};
   // The starter Japan goal also counts the other Japan groups used in past years, e.g. "ออมไปญี่ปุ่น (ME)".
