@@ -164,6 +164,8 @@ table.ledger tr.future td{opacity:.6}
 .billgrp{border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:10px;margin:8px 0;overflow:hidden;background:color-mix(in srgb,var(--sunk) 45%,var(--surface))}
 .billgrp .billrow{padding:8px 10px 6px;background:var(--sunk)}
 .billgrp .item:last-child{border-bottom:0}
+.drag-ok{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.dragging{position:relative;z-index:5;background:var(--surface);box-shadow:0 6px 18px rgba(0,0,0,.25);outline:2px solid var(--accent);border-radius:8px;cursor:grabbing}
 .billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
 .billrow .num{white-space:nowrap}
 .item.inbill{padding-left:16px}
@@ -798,9 +800,57 @@ function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
 
 /* ---------- entry list ---------- */
 function payText(e){ return [e.pay, e.account].filter(Boolean).join(" · ") + (isTct(e) ? ` (ราคาเต็ม ${fmt(tctFull(e))} · รัฐออกให้ ${fmt(tctFull(e) - e.amount)})` : ""); }
+// Order inside a day can be set by press-and-hold then drag; kept in synced settings as {day: [keys]}.
+const orderKey = e => e.billId ? "b:" + e.billId : e.id;
+function dayRank(e){ const l = (settings.dayOrder || {})[e.date]; const i = l ? l.indexOf(orderKey(e)) : -1; return i < 0 ? Infinity : i; }
+function makeDraggable(block, day, key){
+  block.dataset.day = day; block.dataset.key = key; block.classList.add("drag-ok");
+  let timer = null, startY = 0, startX = 0, dragging = false, moved = false;
+  const stopTimer = () => { clearTimeout(timer); timer = null; };
+  // moving the row in the page drops pointer capture, so follow the pointer on the whole document while dragging
+  const move = ev => {
+    if (!dragging) return;
+    ev.preventDefault(); moved = true;
+    const sibs = [...block.parentElement.children].filter(x => x !== block && x.dataset.day === day);
+    for (const s of sibs){
+      const r = s.getBoundingClientRect(), mid = r.top + r.height / 2;
+      const below = block.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING;
+      if (!below && ev.clientY < mid){ s.before(block); break; }
+      if (below && ev.clientY > mid) s.after(block);
+    }
+  };
+  const noScroll = ev => { if (dragging) ev.preventDefault(); };
+  const end = () => {
+    stopTimer();
+    document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", end); document.removeEventListener("pointercancel", end);
+    document.removeEventListener("touchmove", noScroll, {passive: false});
+    if (!dragging) return;
+    dragging = false; block.classList.remove("dragging");
+    // the release of a hold is not a tap: swallow the click that follows it
+    const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener("click", eat, {capture: true, once: true});
+    setTimeout(() => document.removeEventListener("click", eat, {capture: true}), 400);
+    if (!moved) return;
+    const keys = [...block.parentElement.children].filter(x => x.dataset.day === day).map(x => x.dataset.key);
+    store.setSetting("dayOrder", {...(settings.dayOrder || {}), [day]: keys});
+  };
+  block.addEventListener("pointerdown", ev => {
+    if (ev.button > 0) return;
+    startY = ev.clientY; startX = ev.clientX; moved = false;
+    stopTimer(); timer = setTimeout(() => {
+      timer = null; dragging = true; block.classList.add("dragging");
+      if (navigator.vibrate) try { navigator.vibrate(15); } catch {}
+    }, 450);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", end); document.addEventListener("pointercancel", end);
+    // stop the page scrolling while an item is dragged on a touch screen
+    document.addEventListener("touchmove", noScroll, {passive: false});
+  });
+  block.addEventListener("pointermove", ev => { if (timer && (Math.abs(ev.clientY - startY) > 8 || Math.abs(ev.clientX - startX) > 8)) stopTimer(); });
+  block.addEventListener("contextmenu", ev => ev.preventDefault());
+}
 function entryList(box, list, key){
   box.textContent = "";
-  const rows = [...list].sort((a,b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+  const rows = list.map((e, i) => [e, i]).sort(([a, ia], [b, ib]) => a.date < b.date ? 1 : a.date > b.date ? -1 : (dayRank(a) - dayRank(b)) || (ia - ib)).map(([e]) => e);
   if (!rows.length){ box.append(el("div", "empty", "ยังไม่มีรายการในช่วงนี้ กด ＋ เพิ่มรายการ ที่มุมขวาล่าง")); return; }
   const lim = listLimit[key] || 150;
   let day = "";
@@ -830,10 +880,12 @@ function entryList(box, list, key){
       // one framed box per bill, so an item bought separately that day never looks like part of it
       const grp = el("div", "billgrp"); grp.append(hd);
       items.forEach(x => grp.append(entryItem(x, true)));
+      makeDraggable(grp, e.date, orderKey(e));
       box.append(grp);
       continue;
     }
-    box.append(entryItem(e));
+    const one = entryItem(e); makeDraggable(one, e.date, orderKey(e));
+    box.append(one);
   }
   if (rows.length > lim){
     const b = el("button", "btn sm more", `แสดงเพิ่ม (อีก ${rows.length - lim} รายการ)`); b.type = "button";
