@@ -78,6 +78,8 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .panel.alert{border:2px solid var(--exp);background:color-mix(in srgb,var(--exp) 10%,var(--surface))}
 .panel.alert h2{color:var(--exp)}
 .sa{display:grid;gap:10px}
+.ca{display:grid;gap:6px;margin-top:8px}.ca-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
+.ca-add{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:4px}
 .fu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding-top:8px;border-top:1px solid var(--line)}
 .fu-row .fu-open{all:unset;cursor:pointer;display:grid;gap:2px;min-width:0}.fu-row .fu-open:focus-visible{outline:2px solid var(--fg);outline-offset:2px;border-radius:6px}
 .fu-check{margin:4px 0 8px}.sa-row{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
@@ -475,6 +477,11 @@ details summary{cursor:pointer;font-weight:500}
       <div class="actions"><button class="btn primary" type="button" id="syncOn">เชื่อมต่อ</button><button class="btn" type="button" id="syncNow" hidden>ซิงก์ตอนนี้</button><button class="btn" type="button" id="syncOff" hidden>เลิกเชื่อมต่อ</button></div>
       <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่แท็บข้อมูลแอป)</button>
       <div class="toast" id="syncMsg" role="status"></div>
+    </div>
+    <div class="panel">
+      <h2>แอปที่ใช้เช็คในปฏิทิน</h2>
+      <p class="hint" style="margin:0">แตะวันที่ในปฏิทินรายรับ/รายจ่าย จะมีปุ่มติ๊กตามรายชื่อนี้ ครบทุกแอปถึงขึ้นกากบาท วันที่เช็คครบไปแล้วยังนับว่าครบ แม้เพิ่มแอปใหม่</p>
+      <div id="checkApps" class="ca"></div>
     </div>
     <div class="panel">
       <h2>สีของหมวด</h2>
@@ -880,7 +887,7 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); }})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); }})[page](P);
   fillLists();
 }
 let histLimit = 5;
@@ -902,6 +909,24 @@ function renderHistory(){
   }
   if (log.length > histLimit){ const b = el("button", "btn sm more", `ดูทั้งหมด (อีก ${log.length - histLimit})`); b.type = "button"; b.addEventListener("click", () => { histLimit = log.length; renderHistory(); }); box.append(b); }
   if (histLimit > 5){ const b = el("button", "btn sm more", "ย่อเหลือ 5 รายการ"); b.type = "button"; b.addEventListener("click", () => { histLimit = 5; renderHistory(); }); box.append(b); }
+}
+function renderCheckApps(){
+  const box = $("checkApps"); if (!box) return;
+  loadSrcs(); box.textContent = "";
+  const put = list => store.setSetting("checkApps", list);
+  CHECK_SRC.forEach((s, i) => {
+    const row = el("div", "ca-row");
+    const up = el("button", "btn sm", "↑"); up.type = "button"; up.disabled = i === 0; up.setAttribute("aria-label", "เลื่อน " + s + " ขึ้น");
+    up.addEventListener("click", () => { const l = [...CHECK_SRC]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; put(l); });
+    const del = el("button", "btn sm", "ลบ"); del.type = "button"; del.setAttribute("aria-label", "ลบ " + s);
+    del.addEventListener("click", () => { if (CHECK_SRC.length > 1) put(CHECK_SRC.filter(x => x !== s)); });
+    row.append(el("span", "", s), up, del); box.append(row);
+  });
+  const add = el("div", "ca-add"), inp = document.createElement("input"); inp.placeholder = "ชื่อแอปใหม่ เช่น TrueMoney"; inp.setAttribute("aria-label", "ชื่อแอปใหม่");
+  const ok = el("button", "btn sm primary", "＋ เพิ่ม"); ok.type = "button";
+  const go2 = () => { const v = inp.value.trim(); if (!v || CHECK_SRC.includes(v)) { inp.focus(); return; } put([...CHECK_SRC, v]); };
+  ok.addEventListener("click", go2); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go2(); } });
+  add.append(inp, ok); box.append(add);
 }
 function renderCatColors(){
   const box = $("catColors"); if (!box) return;
@@ -1035,16 +1060,27 @@ function renderIncome(P){
 // The income calendar keeps its own marks, apart from the expense (and Overall) calendar.
 // Each day is checked against every app/bank statement; the day is crossed off once all of them are ticked.
 // Days crossed off before the list existed count as all ticked.
-const CHECK_SRC = ["Make by KBank", "TikTok", "Shopee", "Lazada", "SCB", "Next", "ไทยช่วยไทย"];
+// The app list is editable in ตั้งค่า. A finished day is stored as "*" so adding an app later keeps it finished.
+const FIRST_SRC = ["Make by KBank", "TikTok", "Shopee", "Lazada", "SCB", "Next", "ไทยช่วยไทย"];
+let CHECK_SRC = [...FIRST_SRC, "7-11"];
+const loadSrcs = () => { CHECK_SRC = Array.isArray(settings.checkApps) && settings.checkApps.length ? settings.checkApps : [...FIRST_SRC, "7-11"]; };
 const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
 const srcKey = kind => kind === "income" ? "checkSrcInc" : "checkSrc";
-const srcsOf = (iso, kind) => (settings[ckKey(kind)] || []).includes(iso) ? [...CHECK_SRC] : ((settings[srcKey(kind)] || {})[iso] || []).filter(s => CHECK_SRC.includes(s));
+function srcsOf(iso, kind){
+  loadSrcs();
+  if ((settings[ckKey(kind)] || []).includes(iso)) return [...CHECK_SRC];
+  const l = (settings[srcKey(kind)] || {})[iso] || [];
+  // "*" = finished; a day ticked for every app of the first list was finished too
+  if (l.includes("*") || FIRST_SRC.every(s => l.includes(s))) return [...CHECK_SRC];
+  return l.filter(s => CHECK_SRC.includes(s));
+}
 const isChecked = (iso, kind) => srcsOf(iso, kind).length >= CHECK_SRC.length;
 function setSrcs(iso, kind, list){
   const old = settings[ckKey(kind)] || [];
   if (old.includes(iso)) store.setSetting(ckKey(kind), old.filter(d => d !== iso));
   const m = {...(settings[srcKey(kind)] || {})};
-  if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
+  if (CHECK_SRC.every(s => list.includes(s))) m[iso] = ["*"];
+  else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
   store.setSetting(srcKey(kind), m);
 }
 function toggleChecked(iso, kind){ setSrcs(iso, kind, isChecked(iso, kind) ? [] : [...CHECK_SRC]); }
