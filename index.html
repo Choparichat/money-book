@@ -865,7 +865,7 @@ function render(){
   ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); }})[page](P);
   fillLists();
 }
-let histLimit = 40;
+let histLimit = 5;
 function renderHistory(){
   const box = $("histList"); if (!box) return;
   box.textContent = "";
@@ -882,7 +882,8 @@ function renderHistory(){
     if (!gone){ r.tabIndex = 0; r.title = "แตะเพื่อเปิดรายการนี้"; const o = () => openForm(cur); r.addEventListener("click", o); r.addEventListener("keydown", ev => { if (ev.key === "Enter") o(); }); }
     box.append(r);
   }
-  if (log.length > histLimit){ const b = el("button", "btn sm more", `ดูเพิ่ม (อีก ${log.length - histLimit})`); b.type = "button"; b.addEventListener("click", () => { histLimit += 60; renderHistory(); }); box.append(b); }
+  if (log.length > histLimit){ const b = el("button", "btn sm more", `ดูทั้งหมด (อีก ${log.length - histLimit})`); b.type = "button"; b.addEventListener("click", () => { histLimit = log.length; renderHistory(); }); box.append(b); }
+  if (histLimit > 5){ const b = el("button", "btn sm more", "ย่อเหลือ 5 รายการ"); b.type = "button"; b.addEventListener("click", () => { histLimit = 5; renderHistory(); }); box.append(b); }
 }
 function renderCatColors(){
   const box = $("catColors"); if (!box) return;
