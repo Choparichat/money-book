@@ -230,11 +230,11 @@ details summary{cursor:pointer;font-weight:500}
       <details id="syncBox">
         <summary>ซิงก์มือถือกับคอมผ่าน Google Sheet</summary>
         <div style="display:grid;gap:8px;margin-top:10px">
-          <p class="hint" style="margin:0">ติดตั้งสคริปต์ในชีตของคุณตามขั้นตอนใน README แล้วใส่ลิงก์ Web app กับรหัสลับที่นี่ ทำครั้งเดียวในแต่ละเครื่อง</p>
+          <p class="hint" style="margin:0">ติดตั้งสคริปต์ในชีตของคุณตามขั้นตอนใน README แล้วใส่ลิงก์ Web app กับรหัสลับที่นี่ ทำครั้งเดียวในแต่ละเครื่อง แอปจะอ่านรายการที่พิมพ์ในแท็บเดิมของชีตด้วย</p>
           <div class="field"><label for="syncUrl">ลิงก์ Web app</label><input id="syncUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec"></div>
           <div class="field"><label for="syncKey">รหัสลับ</label><input id="syncKey" type="password" autocomplete="off"></div>
           <div class="actions"><button class="btn primary" type="button" id="syncOn">เชื่อมต่อ</button><button class="btn" type="button" id="syncOff" hidden>เลิกเชื่อมต่อ</button></div>
-          <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่ของในชีต)</button>
+          <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่แท็บข้อมูลแอป)</button>
           <div class="toast" id="syncMsg" role="status"></div>
         </div>
       </details>
@@ -394,14 +394,18 @@ function initStore(){
     return j;
   }
   let seq = Date.now();
-  function enqueue(op){
+  const own = list => list.filter(e => e.src !== "sheet");
+  function enqueue(...ops){
     if (!cfg) return;
     let q = ls.get(Q, []);
-    if (op.op === "replaceAll") q = [];
-    q.push({...op, seq: ++seq});
+    for (const op of ops){
+      if (op.op === "replaceAll") q = [];
+      q.push({...op, seq: ++seq});
+    }
     ls.set(Q, q);
     flush();
   }
+  const keyOf = e => [e.kind, e.date, Math.round((Number(e.amount)||0)*100), String(e.name||"").trim(), String(e.note||"").trim()].join("|");
   async function flush(){
     if (!cfg || busy) return;
     const q = ls.get(Q, []);
@@ -431,7 +435,7 @@ function initStore(){
     subscribe(fn){ subs.push(fn); fn(read()); },
     async save(id, data){ const l = read(); const e = {...data, id}; const i = l.findIndex(x => x.id === id); if (i >= 0) l[i] = e; else l.push(e); write(l); enqueue({op:"put", entry:e}); },
     async remove(id){ write(read().filter(e => e.id !== id)); enqueue({op:"del", id}); },
-    replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:list}); },
+    replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
   store.subscribe(list => { entries = list; render(); });
@@ -448,14 +452,16 @@ function initStore(){
     try {
       const j = await call({ops: [], list: true}, c);
       cfg = c; ls.set(CFG, cfg);
-      const local = read();
-      if (!j.entries.length && local.length){
-        ls.set(Q, []); enqueue({op:"replaceAll", entries: local});
-        status(`เชื่อมต่อแล้ว กำลังส่งข้อมูลในเครื่อง ${local.length} รายการขึ้นชีต…`);
-      } else {
-        ls.set(Q, []); write(j.entries);
-        status(`เชื่อมต่อแล้ว โหลดจาก Google Sheet ${j.entries.length} รายการ`);
-      }
+      // Keep what is only on this device: send entries the sheet does not have yet.
+      const left = {};
+      j.entries.forEach(e => { const k = keyOf(e); left[k] = (left[k]||0) + 1; });
+      const extra = own(read()).filter(e => { const k = keyOf(e); if (left[k]){ left[k]--; return false; } return true; });
+      ls.set(Q, []);
+      write([...j.entries, ...extra]);
+      if (extra.length){
+        enqueue(...extra.map(e => ({op:"put", entry:e})));
+        status(`เชื่อมต่อแล้ว โหลดจาก Google Sheet ${j.entries.length} รายการ และกำลังส่งรายการที่มีแค่ในเครื่องนี้ ${extra.length} รายการขึ้นชีต…`);
+      } else status(`เชื่อมต่อแล้ว โหลดจาก Google Sheet ${j.entries.length} รายการ`);
       showCfg();
     } catch (err){ status(`เชื่อมต่อไม่สำเร็จ: ${err.message}`, true); }
     finally { $("syncOn").disabled = false; }
@@ -465,9 +471,9 @@ function initStore(){
   });
   let pushArmed = false;
   $("syncPush").addEventListener("click", () => {
-    if (!pushArmed){ pushArmed = true; $("syncPush").textContent = `กดอีกครั้งเพื่อยืนยัน (ข้อมูลในชีตจะถูกแทนที่ด้วย ${read().length} รายการในเครื่องนี้)`; return; }
-    pushArmed = false; $("syncPush").textContent = "ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่ของในชีต)";
-    enqueue({op:"replaceAll", entries: read()});
+    if (!pushArmed){ pushArmed = true; $("syncPush").textContent = `กดอีกครั้งเพื่อยืนยัน (แท็บ "ข้อมูลแอป" จะถูกแทนที่ด้วย ${own(read()).length} รายการในเครื่องนี้ แท็บเดิมไม่ถูกแตะ)`; return; }
+    pushArmed = false; $("syncPush").textContent = "ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่แท็บข้อมูลแอป)";
+    enqueue({op:"replaceAll", entries: own(read())});
   });
 
   showCfg(); idle(); pull();
@@ -555,6 +561,7 @@ function render(){
         const p = document.createElement("span"); p.className = "pill " + e.kind; p.textContent = KIND_LABEL[e.kind]; td.append(p);
         const b = bizOf(e);
         if (b !== PERSONAL && bizFilter === "all"){ const t = document.createElement("span"); t.className = "tag"; t.textContent = b; td.append(t); }
+        if (e.src === "sheet"){ const t = document.createElement("span"); t.className = "tag"; t.textContent = "ชีต"; t.title = "พิมพ์ไว้ในแท็บเดิมของ Google Sheet"; td.append(t); }
       }
       else td.textContent = txt;
       tr.append(td);
@@ -761,6 +768,7 @@ function defaultDate(){ return curYM === todayISO.slice(0,7) ? todayISO : curYM 
 
 function startEdit(id){
   const e = entries.find(x => x.id === id); if (!e) return;
+  if (e.src === "sheet"){ toast("รายการนี้มาจากแท็บเดิมใน Google Sheet แก้ไขหรือลบได้ในชีต", true); return; }
   editingId = id;
   setKind(e.kind);
   fillBiz(bizOf(e)); fillNames(e.name || ""); fillNotes(e.note || "");
