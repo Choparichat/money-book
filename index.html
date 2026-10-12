@@ -595,6 +595,18 @@ function sizeOf(e){
   const k = (e.note || "").trim(), m = k && (settings.itemSizes || {})[k];
   return m && m.size > 0 ? {size: m.size, unit: m.unit || "ml"} : null;
 }
+// Sizes typed on an entry are also remembered per item in the synced settings,
+// so they count even when the sheet keeps no size column (old script or rows typed in the sheet).
+function rememberSizes(list){
+  const m = {...(settings.itemSizes || {})}; let changed = false;
+  for (const e of list){
+    const k = (e.note || "").trim(), z = Number(e.size);
+    if (!k || !(z > 0)) continue;
+    const u = e.sizeUnit || "ml";
+    if (!m[k] || m[k].size !== z || m[k].unit !== u){ m[k] = {size: z, unit: u}; changed = true; }
+  }
+  if (changed) store.setSetting("itemSizes", m);
+}
 function costPer(e){
   const z = sizeOf(e); if (!z) return null;
   const s = z.size, b = SIZE_BASE[z.unit], a = Number(e.amount);
@@ -1750,7 +1762,8 @@ $("entryForm").addEventListener("submit", async ev => {
     ["unitPrice", "qty"].forEach(k => delete upd[k]);
     if (kind === "saving"){ upd.side = base.side; upd.group = base.group; }
     else { upd.note = base.note || ""; if (base.unitPrice) upd.unitPrice = base.unitPrice; if (base.qty) upd.qty = base.qty; }
-    try { await store.sheetEdit(editing, upd); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    if (base.size){ upd.size = base.size; upd.sizeUnit = base.sizeUnit; } else { delete upd.size; delete upd.sizeUnit; }
+    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -1772,6 +1785,7 @@ $("entryForm").addEventListener("submit", async ev => {
   $("saveBtn").disabled = true;
   try {
     await store.save(out);
+    rememberSizes(out);
     if (editing){ $("dlg").close(); return; }
     const where = `${name}${base.note ? " · " + base.note : ""} วันที่ ${thaiDate(date)}`;
     const away = !inPeriod(out[0]) ? ` (อยู่${mode === "month" ? `เดือน ${TH_MONTHS[+date.slice(5,7) - 1]} ${date.slice(0,4)}` : `ปี ${date.slice(0,4)}`} ไม่ใช่ช่วงที่เปิดดูอยู่)` : "";
@@ -1892,6 +1906,7 @@ $("billSave").addEventListener("click", async () => {
   commitCombos();
   // the item still typed in the form counts too
   const extra = itemFromForm(); if (extra) putInBill(extra);
+  else if (parseFloat($("fSize").value) > 0){ toast("ขนาดที่พิมพ์ไว้ยังไม่ได้ผูกกับสินค้าชิ้นไหน แตะชื่อสินค้าในบิลก่อน แล้วค่อยใส่ขนาด", true); return; }
   const date = $("fDate").value;
   if (!date || !bill.length){ toast("ใส่วันที่และสินค้าอย่างน้อย 1 ชิ้น", true); return; }
   const {gross, disc} = billTotals();
@@ -1911,6 +1926,7 @@ $("billSave").addEventListener("click", async () => {
   $("billSave").disabled = true;
   try {
     await store.save(out);
+    rememberSizes(out);
     if (oldIds.length) await store.remove(oldIds);
     if (billEdit){ bill = []; billSlot = null; billEdit = null; $("dlg").close(); return; }
     toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
@@ -2110,7 +2126,7 @@ function initStore(){
   }
   // What was saved on this device, newest first, so a save that seems lost can be found again.
   const LOG = "money-book-log";
-  const snap = e => ({id: e.id, kind: e.kind, date: e.date, name: e.name || "", note: e.note || "", group: e.group || "", amount: e.amount, biz: e.biz || "", billId: e.billId || ""});
+  const snap = e => ({id: e.id, kind: e.kind, date: e.date, name: e.name || "", note: e.note || "", group: e.group || "", amount: e.amount, biz: e.biz || "", billId: e.billId || "", ...(e.size > 0 ? {size: e.size, sizeUnit: e.sizeUnit || "ml"} : {})});
   function logOps(op, list){
     if (!list.length) return;
     const t = new Date().toISOString();
