@@ -437,6 +437,10 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field" id="unitField"><label for="fUnitName">หน่วย</label><div class="pick"><select id="fUnitName"></select><input id="fUnitNameNew" hidden placeholder="หน่วย"></div></div>
       <div class="field"><label for="fUnit">ราคา/หน่วย</label><input id="fUnit" type="number" step="0.01" min="0" inputmode="decimal"></div>
     </div>
+    <div class="field" id="itemDiscField"><label for="fItemDisc">ส่วนลดเฉพาะรายการนี้</label>
+      <div class="pick" style="grid-template-columns:1fr 84px"><input id="fItemDisc" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"><select id="fItemDiscType" aria-label="หน่วยส่วนลดรายการ"><option value="baht">บาท</option><option value="pct">%</option></select></div>
+      <div class="hint" id="itemDiscHint" hidden></div>
+    </div>
     <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
     <div class="three" id="savRow" hidden>
       <div class="field" id="whoField"><label for="fWho">ใครออม</label><select id="fWho"><option value="">ฉัน</option><option value="แฟน">แฟน</option></select></div>
@@ -687,7 +691,8 @@ function entryItem(e, inBill){
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
-    if (e.disc) tags.push(`ลด ${fmt(e.disc)}`);
+    if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
+    if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
     if (payText(e)) tags.push(payText(e));
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
@@ -1250,7 +1255,7 @@ function fillLists(){
 function setKind(k, fresh){
   kind = k;
   document.querySelectorAll("#kindSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === k)));
-  $("qtyRow").hidden = k !== "expense";
+  $("qtyRow").hidden = k !== "expense"; $("itemDiscField").hidden = k !== "expense";
   $("shopField").hidden = k !== "expense";
   $("savRow").hidden = k !== "saving";
   $("noteField").hidden = k === "saving";
@@ -1282,17 +1287,37 @@ onPick(pk.note, () => {
 });
 onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc);
 $("fPay").addEventListener("change", () => fillAcc(""));
-function updateAmount(){
-  const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value);
-  if (u > 0 && q > 0) $("fAmount").value = (u*q).toFixed(2);
-  updateInstHint();
+// fAmount is always what is paid for this item; the item discount comes off the full price.
+let itemGross = 0;
+const r2 = v => Math.round(v * 100) / 100;
+function itemDiscOf(gross){
+  const v = parseFloat($("fItemDisc").value) || 0;
+  if (!(v > 0) || !(gross > 0)) return 0;
+  return r2(Math.min(gross, $("fItemDiscType").value === "pct" ? gross * Math.min(v, 100) / 100 : v));
 }
-$("fUnit").addEventListener("input", updateAmount);
-$("fQty").addEventListener("input", updateAmount);
+function fullPrice(){
+  const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value);
+  return u > 0 && q > 0 ? r2(u * q) : itemGross;
+}
+function itemDiscNow(){ return kind === "expense" ? itemDiscOf(fullPrice()) : 0; }
+function showItemDisc(){
+  const g = fullPrice(), d = itemDiscOf(g), h = $("itemDiscHint");
+  h.hidden = !(d > 0);
+  if (d > 0) h.textContent = `ราคาเต็ม ${fmt(g)} − ลด ${fmt(d)} = ${fmt(r2(g - d))} บาท`;
+}
+function updateAmount(){
+  const g = fullPrice(), less = editing?.disc || 0;
+  if (g > 0) $("fAmount").value = Math.max(0, g - itemDiscOf(g) - less).toFixed(2);
+  showItemDisc(); updateInstHint();
+}
+["fUnit", "fQty", "fItemDisc"].forEach(id => $(id).addEventListener("input", updateAmount));
+$("fItemDiscType").addEventListener("change", updateAmount);
 $("fAmount").addEventListener("input", () => {
-  const a = parseFloat($("fAmount").value), q = parseFloat($("fQty").value);
-  if (a > 0 && q > 0) $("fUnit").value = (a / q).toFixed(2);
-  updateInstHint();
+  const a = parseFloat($("fAmount").value) + (editing?.disc || 0), q = parseFloat($("fQty").value);
+  const v = parseFloat($("fItemDisc").value) || 0, pct = $("fItemDiscType").value === "pct";
+  itemGross = a > 0 ? r2(v > 0 ? (pct ? (v < 100 ? a / (1 - v / 100) : a) : a + v) : a) : 0;
+  if (itemGross > 0 && q > 0) $("fUnit").value = (itemGross / q).toFixed(2);
+  showItemDisc(); updateInstHint();
 });
 for (let i = 1; i <= 24; i++) $("fInstN").append(opt(String(i), i === 1 ? "1 งวด (จ่ายครั้งเดียว)" : `${i} งวด`));
 $("fInstN").value = "3";
@@ -1324,11 +1349,13 @@ function openForm(e){
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
   $("entryForm").reset();
+  itemGross = 0; $("itemDiscHint").hidden = true;
   setKind(k, true);
   if (e){
     setPick(pk.biz, bizOf(e)); fillNames(e.name || ""); fillNotes(e.note || "");
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
+    $("fItemDisc").value = e.itemDisc || ""; itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
     setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || "");
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
@@ -1379,6 +1406,7 @@ $("entryForm").addEventListener("submit", async ev => {
     if (u > 0) base.unitPrice = u; if (q > 0) base.qty = q;
     const un = pickVal(pk.unit), sh = pickVal(pk.shop);
     if (un && q > 0) base.unit = un; if (sh) base.shop = sh;
+    const idc = itemDiscNow(); if (idc > 0) base.itemDisc = idc;
   }
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
@@ -1414,7 +1442,7 @@ $("entryForm").addEventListener("submit", async ev => {
     toast(out.length > 1 ? `บันทึกผ่อน ${out.length} งวดแล้ว` : `บันทึก${KIND_LABEL[kind]} ${fmt(amount)} บาทแล้ว เพิ่มรายการต่อได้เลย`);
     // keep date, owner, category for the next item from the same bill
     const keepName = name, keepBiz = pickVal(pk.biz), keepShop = pickVal(pk.shop), keepPay = $("fPay").value, keepAcc = pickVal(pk.acc);
-    ["fAmount","fUnit","fQty"].forEach(id => $(id).value = "");
+    ["fAmount","fUnit","fQty","fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true;
     setPick(pk.biz, keepBiz); fillNames(keepName); fillNotes(""); setPick(pk.shop, keepShop); $("fPay").value = keepPay; fillAcc(keepAcc);
     $("fAmount").focus();
   } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
@@ -1431,7 +1459,7 @@ function showBillUI(){
   const box = $("billItems"); box.textContent = "";
   bill.forEach((it, i) => {
     const li = el("div", "li");
-    li.append(el("span", "", `${it.note || it.name}${it.qty ? ` · ${it.qty}${it.unit ? " " + it.unit : ""}${it.unitPrice ? " × " + fmt(it.unitPrice) : ""}` : ""}`), el("span", "num", fmt(it.amount)));
+    li.append(el("span", "", `${it.note || it.name}${it.qty ? ` · ${it.qty}${it.unit ? " " + it.unit : ""}${it.unitPrice ? " × " + fmt(it.unitPrice) : ""}` : ""}${it.itemDisc ? ` · ลด ${fmt(it.itemDisc)}` : ""}`), el("span", "num", fmt(it.amount)));
     const x = el("button", "", "×"); x.type = "button"; x.setAttribute("aria-label", "เอาออกจากบิล");
     x.addEventListener("click", () => { bill.splice(i, 1); showBillUI(); });
     li.append(x); box.append(li);
@@ -1458,13 +1486,14 @@ function itemFromForm(){
   const it = {name, amount, biz: curBiz(), note: pickVal(pk.note)};
   const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value), un = pickVal(pk.unit);
   if (u > 0) it.unitPrice = u; if (q > 0) it.qty = q; if (un && q > 0) it.unit = un;
+  const idc = itemDiscNow(); if (idc > 0) it.itemDisc = idc;
   return it;
 }
 $("billAdd").addEventListener("click", () => {
   const it = itemFromForm();
   if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
   bill.push(it);
-  ["fAmount", "fUnit", "fQty"].forEach(id => $(id).value = "");
+  ["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true;
   fillNotes(""); setPick(pk.unit, "");
   toast(`เพิ่ม ${it.note || it.name} ลงบิลแล้ว ใส่ชิ้นต่อไปได้เลย`);
   showBillUI(); $("fAmount").focus();
@@ -1473,7 +1502,8 @@ $("billAdd").addEventListener("click", () => {
 $("billDiscType").addEventListener("change", showBillUI);
 $("billClear").addEventListener("click", () => { bill = []; $("billDisc").value = ""; showBillUI(); });
 $("fPay").addEventListener("change", showBillUI);
-["fAmount", "fUnit", "fQty"].forEach(id => $(id).addEventListener("input", () => { if (bill.length) showBillUI(); }));
+["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).addEventListener("input", () => { if (bill.length) showBillUI(); }));
+$("fItemDiscType").addEventListener("change", () => { if (bill.length) showBillUI(); });
 $("billSave").addEventListener("click", async () => {
   // the item still typed in the form counts too
   const extra = itemFromForm(); if (extra) bill.push(extra);
@@ -1497,7 +1527,7 @@ $("billSave").addEventListener("click", async () => {
   try {
     await store.save(out);
     toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
-    bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty"].forEach(id => $(id).value = ""); fillNotes("");
+    bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true; fillNotes("");
     showBillUI();
   } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
   finally { $("billSave").disabled = false; }
@@ -1522,7 +1552,7 @@ $("billSave").addEventListener("click", async () => {
 })();
 
 /* ---------- CSV export / restore ---------- */
-const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"]];
+const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"],["itemDisc","ส่วนลดรายการ"]];
 const KIND_TH = {income: "รายรับ", expense: "ค่าใช้จ่าย", saving: "ออม+ลงทุน"};
 $("exportBtn").addEventListener("click", () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
@@ -1573,7 +1603,7 @@ $("restoreFile").addEventListener("change", async ev => {
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind: k, date: d, ym: ymOf(d), name: get(r, "name"), amount: a, updatedAt: new Date().toISOString()};
     for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId"]){ const v = get(r, key); if (v) e[key] = v; }
-    for (const key of ["unitPrice","qty","disc"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
+    for (const key of ["unitPrice","qty","disc","itemDisc"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
     if (k === "saving" && e.side !== "ขาย") e.side = "ซื้อ";
     if (e.biz === PERSONAL) delete e.biz;
     return e;
