@@ -68,6 +68,11 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .page{display:grid;gap:16px}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 @media (max-width:820px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.panel.alert{border:2px solid var(--exp);background:color-mix(in srgb,var(--exp) 10%,var(--surface))}
+.panel.alert h2{color:var(--exp)}
+.sa{display:grid;gap:10px}.sa-row{display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
+.sa-n strong{font-weight:600}.sa-f{display:grid;grid-template-columns:minmax(0,1fr) 70px auto auto;gap:6px;align-items:center}
+.sa-f input,.sa-f select{min-width:0;padding:6px 8px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;gap:12px;min-width:0;align-content:start}
 .panel-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center}
 .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
@@ -282,6 +287,11 @@ details summary{cursor:pointer;font-weight:500}
 <main>
   <!-- OVERALL -->
   <section class="page" id="page-overall">
+    <div class="panel alert" id="sizeAlert" hidden>
+      <h2 id="sizeAlertTitle"></h2>
+      <p class="hint" style="margin:0">ใส่น้ำหนักหรือปริมาณต่อ 1 หน่วยที่ซื้อ (เช่น อัญชัน 1 ถุง = 100 g) เพื่อคิดต้นทุนต่อกรัม ใส่ครั้งเดียว แอปจำให้ทุกครั้งที่ซื้อของนี้ ถ้าจำไม่ได้ ไว้ชั่งแล้วค่อยมาใส่</p>
+      <div id="sizeAlertList" class="sa"></div>
+    </div>
     <div class="tiles">
       <div class="tile inc"><span class="k">รายรับ</span><span class="v num" id="oInc">0</span></div>
       <div class="tile exp"><span class="k">รายจ่าย</span><span class="v num" id="oExp">0</span></div>
@@ -565,11 +575,18 @@ const $ = id => document.getElementById(id);
 const fmt = n => (Number(n)||0).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});
 // Package size: l and kg count as ml and g so prices compare across sizes.
 const SIZE_BASE = {ml: ["ml", 1], l: ["ml", 1000], g: ["g", 1], kg: ["g", 1000], "ชิ้น": ["ชิ้น", 1], "ฟอง": ["ฟอง", 1]};
+// A size typed on the entry, else the one remembered for that item (settings, synced; works for sheet rows too).
+function sizeOf(e){
+  if (Number(e.size) > 0) return {size: Number(e.size), unit: e.sizeUnit || "ml"};
+  const k = (e.note || "").trim(), m = k && (settings.itemSizes || {})[k];
+  return m && m.size > 0 ? {size: m.size, unit: m.unit || "ml"} : null;
+}
 function costPer(e){
-  const s = Number(e.size), b = SIZE_BASE[e.sizeUnit || "ml"], a = Number(e.amount);
+  const z = sizeOf(e); if (!z) return null;
+  const s = z.size, b = SIZE_BASE[z.unit], a = Number(e.amount);
   if (!(s > 0) || !b || !(a > 0)) return null;
   const total = s * b[1] * (Number(e.qty) > 0 ? Number(e.qty) : 1);
-  return {per: a / total, base: b[0], total};
+  return {per: a / total, base: b[0], total, size: s, unit: z.unit};
 }
 const fmtC = v => v >= 1 ? fmt(v) : (Number(v)||0).toLocaleString("th-TH", {minimumFractionDigits: 2, maximumFractionDigits: 4});
 const fmt0 = n => Math.round(Number(n)||0).toLocaleString("th-TH");
@@ -777,7 +794,7 @@ function entryItem(e, inBill){
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
-    if (e.size){ const c = costPer(e); tags.push(`${e.size} ${e.sizeUnit || "ml"}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); }
+    { const z = sizeOf(e); if (z){ const c = costPer(e); tags.push(`${z.size} ${z.unit}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); } }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
     if (payText(e)) tags.push(payText(e));
@@ -832,7 +849,42 @@ function renderCatColors(){
 }
 function setNum(id, v, neg){ $(id).textContent = fmt(v); $(id).classList.toggle("neg", !!neg && v < 0); }
 
+/* ---------- Muan ingredients still missing a size ---------- */
+const RAW = "ค่าวัตถุดิบ";
+function needSize(){
+  const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const skip = new Set(settings.sizeSkip || []), byNote = new Map();
+  for (const e of entries){
+    if (e.kind !== "expense" || bizOf(e) !== "Muan" || e.name !== RAW) continue;
+    const n = (e.note || "").trim(); if (!n || skip.has(n)) continue;
+    const v = byNote.get(n) || {note: n, last: null, sized: false};
+    if (sizeOf(e)) v.sized = true;
+    if (!v.last || e.date > v.last.date) v.last = e;
+    byNote.set(n, v);
+  }
+  return [...byNote.values()].filter(v => !v.sized && v.last.date >= since).sort((a, b) => a.last.date < b.last.date ? 1 : -1);
+}
+function renderSizeAlert(){
+  const box = $("sizeAlert"), list = needSize();
+  box.hidden = !list.length; if (!list.length) return;
+  $("sizeAlertTitle").textContent = `⚠ วัตถุดิบ Muan ยังไม่ได้ใส่ขนาด ${list.length} รายการ`;
+  const ul = $("sizeAlertList"); ul.textContent = "";
+  list.slice(0, 8).forEach(v => {
+    const row = el("div", "sa-row");
+    const name = el("div", "sa-n"); name.append(el("strong", "", v.note), el("span", "hint", ` ซื้อล่าสุด ${thaiDate(v.last.date)} · ${fmt(v.last.amount)} บาท${v.last.unit ? " / " + (v.last.qty || 1) + " " + v.last.unit : ""}`));
+    const inp = document.createElement("input"); inp.type = "number"; inp.min = "0"; inp.step = "any"; inp.inputMode = "decimal"; inp.placeholder = "เช่น 100"; inp.setAttribute("aria-label", "ขนาดของ " + v.note);
+    const sel = document.createElement("select"); ["g", "ml", "kg", "l", "ชิ้น", "ฟอง"].forEach(u => sel.append(opt(u, u))); sel.setAttribute("aria-label", "หน่วย");
+    const ok = el("button", "btn sm primary", "บันทึก"); ok.type = "button";
+    ok.addEventListener("click", () => { const z = parseFloat(inp.value); if (!(z > 0)){ inp.focus(); return; } store.setSetting("itemSizes", {...(settings.itemSizes || {}), [v.note]: {size: z, unit: sel.value}}); });
+    const no = el("button", "btn sm", "ไม่ต้องใส่"); no.type = "button"; no.title = "ของที่ไม่ต้องคิดต่อกรัม เช่น ค่าส่ง";
+    no.addEventListener("click", () => store.setSetting("sizeSkip", [...new Set([...(settings.sizeSkip || []), v.note])]));
+    const f = el("div", "sa-f"); f.append(inp, sel, ok, no);
+    row.append(name, f); ul.append(row);
+  });
+  if (list.length > 8) ul.append(el("div", "hint", `และอีก ${list.length - 8} รายการ ใส่ชุดนี้ก่อน แล้วรายการที่เหลือจะขึ้นมาแทน`));
+}
 function renderOverall(P){
+  renderSizeAlert();
   const cy = calYM(); $("oCalTitle").textContent = `ปฏิทิน ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("oCal"), cy, pickDay);
   const s = sums(P);
@@ -1086,7 +1138,7 @@ function renderCost(all, itemKey){
     const min = Math.min(...xs.map(x => x.per));
     const ch = prev ? (last.per - prev.per) / prev.per * 100 : 0;
     const tr = el("tr"); tr.title = `ซื้อ ${xs.length} ครั้ง · ล่าสุด ${thaiDate(last.e.date)}`;
-    const nm = el("td", ""); nm.append(el("div", "", name), el("div", "hint", `${last.e.size} ${last.e.sizeUnit || "ml"} · ซื้อ ${xs.length} ครั้ง · ถูกสุด ${fmtC(min)}`));
+    const nm = el("td", ""); nm.append(el("div", "", name), el("div", "hint", `${last.size} ${last.unit} · ซื้อ ${xs.length} ครั้ง · ถูกสุด ${fmtC(min)}`));
     tr.append(nm, el("td", "n", `${fmtC(last.per)}/${base}`), el("td", "n", fmtC(avg)),
       el("td", "n" + (ch > 0.5 ? " neg" : ""), !prev ? "—" : Math.abs(ch) < 0.5 ? "=" : `${ch > 0 ? "▲" : "▼"}${Math.abs(ch).toFixed(0)}%`));
     tb.append(tr);
@@ -1509,7 +1561,8 @@ onPick(pk.note, () => {
   if (last.unit) setPick(pk.unit, last.unit);
   if (last.shop) setPick(pk.shop, last.shop);
   const sz = entries.filter(e => e.kind === "expense" && e.note === n && e.size > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
-  if (sz){ $("fSize").value = sz.size; $("fSizeUnit").value = sz.sizeUnit || "ml"; }
+  const zz = sz ? {size: sz.size, unit: sz.sizeUnit || "ml"} : sizeOf({note: n});
+  if (zz){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   updateAmount(); showSize();
 });
 onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc);
