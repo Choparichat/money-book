@@ -1449,7 +1449,7 @@ function initStore(){
       ls.set(Q, ls.get(Q, []).filter(o => !sent.has(o.seq)));
       ok = true;
       if (q.some(o => o.op === "sheetEdit" || o.op === "sheetDel")) setTimeout(() => {
-        pull().then(() => { if (j.conflicts) status(`มี ${j.conflicts} รายการในชีตที่ถูกแก้ไปก่อนแล้ว แอปจึงไม่ได้เขียนทับ ลองแก้อีกครั้ง`, true); });
+        pull().then(() => { if (j.conflicts){ const m = `แก้ไม่สำเร็จ ${j.conflicts} รายการ เพราะแถวนั้นในชีตถูกแก้หรือย้ายไปก่อนแล้ว แอปจึงแสดงค่าล่าสุดจากชีต ลองแก้อีกครั้ง`; status(m, true); alert(m); } });
       }, 0);
     } catch (err){ status(`ยังส่งขึ้น Google Sheet ไม่ได้: ${err.message}`, true); }
     finally { busy = false; }
@@ -1465,8 +1465,8 @@ function initStore(){
 
   function sheetOp(orig, op){
     if (!cfg) throw new Error("ต้องเชื่อม Google Sheet ก่อน ถึงจะแก้รายการจากชีตได้");
-    if ((ls.get("money-book-script", 0)) < 3 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
-    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || ""}});
+    if ((ls.get("money-book-script", 0)) < 4 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
+    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || "", note: orig.note || ""}});
   }
   store = {
     kind: "local",
