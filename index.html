@@ -117,6 +117,18 @@ table.ledger tr.future td{opacity:.6}
 .day{font-size:.78rem;color:var(--muted);padding:10px 2px 4px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
 .item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .item:hover{background:var(--sunk)}
+.billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
+.billrow .num{white-space:nowrap}
+.item.inbill{padding-left:16px}
+.bill{display:grid;gap:8px;background:var(--sunk);border-radius:8px;padding:10px 12px}
+.bill-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.bill .li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;font-size:.9rem;padding:4px 0;border-bottom:1px solid var(--line)}
+.bill .li button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0 4px}
+.bill-sum{display:grid;gap:2px;font-size:.9rem}
+.bill-sum div{display:flex;justify-content:space-between}
+.bill-sum .net{font-weight:700;font-size:1rem}
+.datebox{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;position:relative}
+.vh{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0}
 .item .t{font-weight:500;overflow-wrap:anywhere}
 .item .s{grid-column:1;font-size:.8rem;color:var(--muted);overflow-wrap:anywhere}
 .item .a{grid-row:1/3;grid-column:2;text-align:right;font-weight:600;white-space:nowrap}
@@ -394,7 +406,7 @@ details summary{cursor:pointer;font-weight:500}
     </div>
     <div class="hint" id="sheetNote" hidden></div>
     <div class="two">
-      <div class="field"><label for="fDate">วันที่</label><input id="fDate" type="date" required></div>
+      <div class="field"><label for="fDateText">วันที่ (วัน/เดือน/ปี)</label><div class="datebox"><input id="fDateText" placeholder="วว/ดด/ปปปป" inputmode="numeric" maxlength="10" autocomplete="off"><button type="button" class="btn sm" id="fDatePick" aria-label="เลือกวันที่จากปฏิทิน">📅</button><input id="fDate" type="date" tabindex="-1" aria-hidden="true" class="vh"></div></div>
       <div class="field"><label for="fAmount">จำนวนเงินรวม (บาท)</label><input id="fAmount" type="number" step="0.01" inputmode="decimal" required></div>
     </div>
     <div class="field" id="bizField"><label for="fBiz">ของใคร</label><div class="pick"><select id="fBiz"></select><input id="fBizNew" hidden placeholder="ชื่อร้าน/กิจการใหม่"></div></div>
@@ -420,8 +432,19 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
+    <div class="bill" id="billBox" hidden>
+      <div class="bill-head"><strong>บิลนี้</strong><span class="hint" id="billInfo"></span></div>
+      <div id="billItems"></div>
+      <div class="two">
+        <div class="field"><label for="billDisc">ส่วนลดทั้งบิล</label><input id="billDisc" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
+        <div class="field"><label for="billDiscType">หน่วยส่วนลด</label><select id="billDiscType"><option value="baht">บาท</option><option value="pct">%</option></select></div>
+      </div>
+      <div class="bill-sum" id="billSum"></div>
+      <div class="actions"><button class="btn primary" type="button" id="billSave">บันทึกทั้งบิล</button><button class="btn" type="button" id="billClear">ล้างบิล</button></div>
+    </div>
     <div class="actions">
       <button class="btn primary" type="submit" id="saveBtn">บันทึก</button>
+      <button class="btn" type="button" id="billAdd" hidden>＋ เพิ่มลงบิล (ซื้อหลายอย่าง)</button>
       <button class="btn danger" type="button" id="delBtn" hidden>ลบรายการนี้</button>
       <button class="btn danger" type="button" id="delAllBtn" hidden>ลบทุกงวด</button>
     </div>
@@ -466,7 +489,7 @@ const ymOf = d => d.slice(0,7);
 const now = new Date();
 const todayISO = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
-const thaiDate = iso => { const [y,m,d] = iso.split("-").map(Number); return `${d} ${TH_ABBR[m-1]} ${y}`; };
+const thaiDate = iso => { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; };
 const addMonths = (ym, n) => { let [y,m] = ym.split("-").map(Number); m += n; while (m < 1){ m += 12; y--; } while (m > 12){ m -= 12; y++; } return `${y}-${pad(m)}`; };
 const signedSaving = e => (e.side === "ขาย" ? -1 : 1) * (Number(e.amount)||0);
 
@@ -599,13 +622,36 @@ function entryList(box, list, key){
   if (!rows.length){ box.append(el("div", "empty", "ยังไม่มีรายการในช่วงนี้ กด ＋ เพิ่มรายการ ที่มุมขวาล่าง")); return; }
   const lim = listLimit[key] || 150;
   let day = "";
-  for (const e of rows.slice(0, lim)){
+  const shownBills = new Set();
+  const visible = rows.slice(0, lim);
+  for (const e of visible){
+    if (e.billId && shownBills.has(e.billId)) continue;
     if (e.date !== day){
       day = e.date;
       const dayTotal = rows.filter(x => x.date === day).reduce((a, x) => a + (x.kind === "saving" ? signedSaving(x) : Number(x.amount)||0), 0);
       const d = el("div", "day"); d.append(el("span", "", thaiDate(day)), el("span", "num", fmt(dayTotal))); box.append(d);
     }
-    const it = el("div", "item" + (e.date > todayISO ? " future" : ""));
+    if (e.billId){
+      // one shopping trip: a header with the bill total, then each item
+      shownBills.add(e.billId);
+      const items = rows.filter(x => x.billId === e.billId);
+      const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0), net = items.reduce((a, x) => a + (Number(x.amount) || 0), 0);
+      const hd = el("div", "billrow");
+      hd.append(el("span", "", `🧾 บิล${e.shop ? " " + e.shop : ""} · ${items.length} รายการ${disc ? ` · ลด ${fmt(disc)}` : ""}`), el("span", "num", "รวม " + fmt(net)));
+      box.append(hd);
+      items.forEach(x => box.append(entryItem(x, true)));
+      continue;
+    }
+    box.append(entryItem(e));
+  }
+  if (rows.length > lim){
+    const b = el("button", "btn sm more", `แสดงเพิ่ม (อีก ${rows.length - lim} รายการ)`); b.type = "button";
+    b.addEventListener("click", () => { listLimit[key] = lim + 300; render(); });
+    box.append(b);
+  }
+}
+function entryItem(e, inBill){
+    const it = el("div", "item" + (e.date > todayISO ? " future" : "") + (inBill ? " inbill" : ""));
     it.tabIndex = 0;
     const title = e.kind === "saving" ? `${e.name || "—"}${e.group ? " · " + e.group : ""}` : (e.note ? `${e.note}` : (e.name || "—"));
     it.append(el("div", "t", title));
@@ -614,7 +660,8 @@ function entryList(box, list, key){
     if (e.kind !== "saving" && e.note) tags.push(e.name);
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
-    if (e.shop) tags.push("จาก " + e.shop);
+    if (e.shop && !inBill) tags.push("จาก " + e.shop);
+    if (e.disc) tags.push(`ลด ${fmt(e.disc)}`);
     if (payText(e)) tags.push(payText(e));
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
@@ -624,13 +671,7 @@ function entryList(box, list, key){
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     it.addEventListener("click", () => openForm(e));
     it.addEventListener("keydown", ev => { if (ev.key === "Enter") openForm(e); });
-    box.append(it);
-  }
-  if (rows.length > lim){
-    const b = el("button", "btn sm more", `แสดงเพิ่ม (อีก ${rows.length - lim} รายการ)`); b.type = "button";
-    b.addEventListener("click", () => { listLimit[key] = lim + 300; render(); });
-    box.append(b);
-  }
+    return it;
 }
 function chips(box, rows, key){
   box.textContent = "";
@@ -1144,6 +1185,7 @@ function setKind(k, fresh){
   fillPick(pk.group, [{values: groupList()}], "");
   fillPays();
   fillAcc("");
+  showBillUI();
 }
 document.querySelectorAll("#kindSeg button").forEach(b => b.addEventListener("click", () => setKind(b.dataset.k)));
 onPick(pk.biz, () => { fillNames(""); fillNotes(""); });
@@ -1199,7 +1241,7 @@ function openForm(e){
   $("toast").textContent = ""; $("snapMsg").textContent = ""; $("snapTextWrap").hidden = true;
   $("formTitle").textContent = e ? "แก้ไขรายการ" : "เพิ่มรายการ";
   $("saveBtn").textContent = e ? "บันทึกการแก้ไข" : "บันทึก";
-  $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && e.instId);
+  $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && (e.instId || e.billId));
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
   $("entryForm").reset();
@@ -1219,6 +1261,7 @@ function openForm(e){
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
   }
   sheetMode(e);
+  bill = []; $("billDisc").value = ""; showBillUI();
   updateInstHint();
 }
 $("fab").addEventListener("click", () => openForm(null));
@@ -1228,7 +1271,7 @@ $("dlg").addEventListener("close", () => { editing = null; });
 function flash(msg){ $("storeNote").textContent = msg; $("storeNote").style.color = "var(--exp)"; clearTimeout(flash.t); flash.t = setTimeout(() => { $("storeNote").style.color = ""; store?.status?.(); }, 3500); }
 function toast(msg, bad){ const t = $("toast"); t.textContent = msg; t.style.color = bad ? "var(--exp)" : "var(--muted)"; }
 let delArmed = 0;
-function resetDelete(){ delArmed = 0; $("delBtn").textContent = "ลบรายการนี้"; $("delAllBtn").textContent = "ลบทุกงวด"; }
+function resetDelete(){ delArmed = 0; $("delBtn").textContent = "ลบรายการนี้"; $("delAllBtn").textContent = editing?.billId ? "ลบทั้งบิล" : "ลบทุกงวด"; }
 $("delBtn").addEventListener("click", async () => {
   if (!editing) return;
   if (delArmed !== 1){ resetDelete(); delArmed = 1; $("delBtn").textContent = "กดอีกครั้งเพื่อยืนยันการลบ"; return; }
@@ -1238,9 +1281,10 @@ $("delBtn").addEventListener("click", async () => {
   } catch (err){ toast(err.message, true); resetDelete(); }
 });
 $("delAllBtn").addEventListener("click", async () => {
-  if (!editing?.instId) return;
-  const ids = entries.filter(x => x.instId === editing.instId).map(x => x.id);
-  if (delArmed !== 2){ resetDelete(); delArmed = 2; $("delAllBtn").textContent = `กดอีกครั้งเพื่อลบทั้ง ${ids.length} งวด`; return; }
+  const k = editing?.instId ? "instId" : editing?.billId ? "billId" : null;
+  if (!k) return;
+  const ids = entries.filter(x => x[k] === editing[k]).map(x => x.id);
+  if (delArmed !== 2){ resetDelete(); delArmed = 2; $("delAllBtn").textContent = `กดอีกครั้งเพื่อลบทั้ง ${ids.length} ${k === "billId" ? "รายการในบิล" : "งวด"}`; return; }
   await store.remove(ids); $("dlg").close();
 });
 
@@ -1270,7 +1314,7 @@ $("entryForm").addEventListener("submit", async ev => {
   }
   const out = [];
   if (editing){
-    out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {})});
+    out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {}), ...(editing.billId ? {billId: editing.billId} : {}), ...(editing.disc ? {disc: editing.disc} : {})});
   } else if (kind === "expense" && base.pay === "ผ่อนจ่าย" && Number($("fInstN").value) > 1){
     // Split into monthly installments so each month shows what is due.
     const n = Number($("fInstN").value), start = $("fInstStart").value || addMonths(ymOf(date), 1);
@@ -1298,8 +1342,108 @@ $("entryForm").addEventListener("submit", async ev => {
   finally { $("saveBtn").disabled = false; }
 });
 
+/* ---------- one bill, several items ---------- */
+let bill = [];
+function showBillUI(){
+  const can = kind === "expense" && !editing && $("fPay").value !== "ผ่อนจ่าย";
+  $("billAdd").hidden = !can;
+  $("billBox").hidden = !can || !bill.length;
+  if (!bill.length) return;
+  const box = $("billItems"); box.textContent = "";
+  bill.forEach((it, i) => {
+    const li = el("div", "li");
+    li.append(el("span", "", `${it.note || it.name}${it.qty ? ` · ${it.qty}${it.unit ? " " + it.unit : ""}${it.unitPrice ? " × " + fmt(it.unitPrice) : ""}` : ""}`), el("span", "num", fmt(it.amount)));
+    const x = el("button", "", "×"); x.type = "button"; x.setAttribute("aria-label", "เอาออกจากบิล");
+    x.addEventListener("click", () => { bill.splice(i, 1); showBillUI(); });
+    li.append(x); box.append(li);
+  });
+  const pending = itemFromForm();
+  if (pending){ const li = el("div", "li muted"); li.append(el("span", "", `${pending.note || pending.name} (กำลังกรอก จะรวมตอนบันทึก)`), el("span", "num", fmt(pending.amount)), el("span")); box.append(li); }
+  const {gross, disc, net} = billTotals(pending);
+  $("billInfo").textContent = `${bill.length + (pending ? 1 : 0)} รายการ`;
+  const sm = $("billSum"); sm.textContent = "";
+  const line = (a, b, c) => { const d = el("div", c || ""); d.append(el("span", "", a), el("span", "num", b)); sm.append(d); };
+  line("รวมก่อนลด", fmt(gross));
+  if (disc) line("ส่วนลด", "−" + fmt(disc));
+  line("ยอดจ่ายจริง", fmt(net), "net");
+}
+function billTotals(pending){
+  const gross = Math.round(bill.concat(pending ? [pending] : []).reduce((a, it) => a + it.amount, 0) * 100) / 100;
+  const v = parseFloat($("billDisc").value) || 0;
+  const disc = Math.min(gross, Math.round((($("billDiscType").value === "pct") ? gross * v / 100 : v) * 100) / 100);
+  return {gross, disc, net: Math.round((gross - disc) * 100) / 100};
+}
+function itemFromForm(){
+  const amount = Math.round(parseFloat($("fAmount").value) * 100) / 100, name = pickVal(pk.name);
+  if (!isFinite(amount) || amount <= 0 || !name) return null;
+  const it = {name, amount, biz: curBiz(), note: pickVal(pk.note)};
+  const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value), un = pickVal(pk.unit);
+  if (u > 0) it.unitPrice = u; if (q > 0) it.qty = q; if (un && q > 0) it.unit = un;
+  return it;
+}
+$("billAdd").addEventListener("click", () => {
+  const it = itemFromForm();
+  if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
+  bill.push(it);
+  ["fAmount", "fUnit", "fQty"].forEach(id => $(id).value = "");
+  fillNotes(""); setPick(pk.unit, "");
+  toast(`เพิ่ม ${it.note || it.name} ลงบิลแล้ว ใส่ชิ้นต่อไปได้เลย`);
+  showBillUI(); $("fAmount").focus();
+});
+["billDisc", "billDiscType"].forEach(id => $(id).addEventListener("input", showBillUI));
+$("billDiscType").addEventListener("change", showBillUI);
+$("billClear").addEventListener("click", () => { bill = []; $("billDisc").value = ""; showBillUI(); });
+$("fPay").addEventListener("change", showBillUI);
+["fAmount", "fUnit", "fQty"].forEach(id => $(id).addEventListener("input", () => { if (bill.length) showBillUI(); }));
+$("billSave").addEventListener("click", async () => {
+  // the item still typed in the form counts too
+  const extra = itemFromForm(); if (extra) bill.push(extra);
+  const date = $("fDate").value;
+  if (!date || !bill.length){ toast("ใส่วันที่และสินค้าอย่างน้อย 1 ชิ้น", true); return; }
+  const {gross, disc} = billTotals();
+  const billId = "b" + Date.now().toString(36);
+  const shared = {kind: "expense", date, ym: ymOf(date), pay: $("fPay").value, billId, updatedAt: new Date().toISOString()};
+  const sh = pickVal(pk.shop); if (sh) shared.shop = sh;
+  const acc = pickVal(pk.acc); if (acc && shared.pay !== "เงินสด") shared.account = acc;
+  // The discount is shared out over the items by price, so every total stays what was really paid.
+  let left = disc;
+  const out = bill.map((it, i) => {
+    const share = i === bill.length - 1 ? Math.round(left * 100) / 100 : Math.round(disc * it.amount / gross * 100) / 100;
+    left -= share;
+    const e = {...shared, ...it, id: store.newId(), amount: Math.round((it.amount - share) * 100) / 100};
+    if (share > 0) e.disc = share;
+    return e;
+  });
+  $("billSave").disabled = true;
+  try {
+    await store.save(out);
+    toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
+    bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty"].forEach(id => $(id).value = ""); fillNotes("");
+    showBillUI();
+  } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
+  finally { $("billSave").disabled = false; }
+});
+
+/* ---------- date as day/month/year ---------- */
+(() => {
+  const d = $("fDate"), t = $("fDateText");
+  const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  const show = () => { const v = desc.get.call(d); t.value = v ? thaiDate(v) : ""; };
+  Object.defineProperty(d, "value", {get(){ return desc.get.call(d); }, set(v){ desc.set.call(d, v); show(); }});
+  t.addEventListener("input", () => {
+    const m = t.value.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+    let iso = "";
+    if (m){ let y = +m[3]; if (y > 2400) y -= 543; const dt = new Date(y, m[2] - 1, m[1]); if (dt.getMonth() === m[2] - 1 && dt.getDate() === +m[1]) iso = `${y}-${pad(m[2])}-${pad(m[1])}`; }
+    desc.set.call(d, iso);
+    t.setCustomValidity(t.value && !iso ? "ใส่วันที่แบบ วัน/เดือน/ปี เช่น 07/10/2026" : "");
+  });
+  t.addEventListener("blur", () => { if (desc.get.call(d)) show(); });
+  d.addEventListener("change", show);
+  $("fDatePick").addEventListener("click", () => { try { d.showPicker(); } catch { d.focus(); d.click(); } });
+})();
+
 /* ---------- CSV export / restore ---------- */
-const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"]];
+const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"]];
 const KIND_TH = {income: "รายรับ", expense: "ค่าใช้จ่าย", saving: "ออม+ลงทุน"};
 $("exportBtn").addEventListener("click", () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
@@ -1349,8 +1493,8 @@ $("restoreFile").addEventListener("change", async ev => {
     const k = KIND_BY_TH[get(r, "kindTh")], d = parseDate(get(r, "date")), a = parseAmt(get(r, "amount"));
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind: k, date: d, ym: ymOf(d), name: get(r, "name"), amount: a, updatedAt: new Date().toISOString()};
-    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who"]){ const v = get(r, key); if (v) e[key] = v; }
-    for (const key of ["unitPrice","qty"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
+    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId"]){ const v = get(r, key); if (v) e[key] = v; }
+    for (const key of ["unitPrice","qty","disc"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
     if (k === "saving" && e.side !== "ขาย") e.side = "ซื้อ";
     if (e.biz === PERSONAL) delete e.biz;
     return e;
