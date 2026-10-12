@@ -525,6 +525,10 @@ details summary{cursor:pointer;font-weight:500}
       <div class="hint" id="itemDiscHint" hidden></div>
     </div>
     <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
+    <div class="two" id="incRow" hidden>
+      <div class="field"><label for="fTime">เวลา</label><input id="fTime" type="time"></div>
+      <div class="field"><label for="fPayer">ชื่อคนจ่าย</label><div class="pick"><select id="fPayer"></select><input id="fPayerNew" hidden placeholder="ชื่อคนจ่ายใหม่"></div></div>
+    </div>
     <div class="three" id="savRow" hidden>
       <div class="field" id="whoField"><label for="fWho">ใครออม</label><select id="fWho"><option value="">ฉัน</option><option value="แฟน">แฟน</option></select></div>
       <div class="field"><label for="fSide">ซื้อ/ขาย</label><select id="fSide"><option>ซื้อ</option><option>ขาย</option></select></div>
@@ -825,6 +829,8 @@ function entryItem(e, inBill){
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
+    if (e.time) tags.push(`เวลา ${e.time} น.`);
+    if (e.payer) tags.push("จาก " + e.payer);
     { const z = sizeOf(e); if (z){ const c = costPer(e); tags.push(`${z.size} ${z.unit}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); } }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
@@ -1415,10 +1421,10 @@ $("planDefault").addEventListener("click", () => {
 /* ---------- dropdowns: past values plus "add new" ---------- */
 const pk = {};
 [["biz","fBiz","＋ เพิ่มร้าน/กิจการใหม่…"],["name","fName","＋ เพิ่มหมวดใหม่…"],["note","fNote","＋ เพิ่มรายละเอียดใหม่…"],["unit","fUnitName","＋ หน่วยใหม่…"],
- ["shop","fShop","＋ เพิ่มร้านใหม่…"],["group","fGroup","＋ เพิ่มกลุ่มใหม่…"],["acc","fAcc","＋ เพิ่มใหม่…"]]
+ ["shop","fShop","＋ เพิ่มร้านใหม่…"],["group","fGroup","＋ เพิ่มกลุ่มใหม่…"],["acc","fAcc","＋ เพิ่มใหม่…"],["payer","fPayer","＋ เพิ่มชื่อใหม่…"]]
   .forEach(([k, id, t]) => pk[k] = {sel: $(id), inp: $(id + "New"), newText: t});
 pk.biz.label = bizLabel;
-pk.note.empty = "— ไม่ระบุ —"; pk.shop.empty = "— ไม่ระบุ —"; pk.unit.empty = "—"; pk.acc.empty = "— ไม่ระบุ —";
+pk.note.empty = "— ไม่ระบุ —"; pk.shop.empty = "— ไม่ระบุ —"; pk.unit.empty = "—"; pk.acc.empty = "— ไม่ระบุ —"; pk.payer.empty = "— ไม่ระบุ —";
 const opt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; return o; };
 const pickVal = p => p.sel.value === NEW ? p.inp.value.trim() : p.sel.value;
 function setPick(p, v){
@@ -1550,6 +1556,7 @@ makeCombo(pk.name, "พิมพ์ค้นหา หรือพิมพ์�
 makeCombo(pk.shop, "พิมพ์ค้นหาร้าน หรือพิมพ์ชื่อร้านใหม่");
 makeCombo(pk.group, "พิมพ์ค้นหา หรือพิมพ์ชื่อกลุ่มใหม่");
 makeCombo(pk.biz, "พิมพ์ค้นหา หรือพิมพ์ชื่อร้าน/กิจการใหม่");
+makeCombo(pk.payer, "พิมพ์ค้นหา หรือพิมพ์ชื่อคนจ่ายใหม่");
 
 /* ---------- entry form ---------- */
 let kind = "expense", editing = null;
@@ -1598,7 +1605,7 @@ function setKind(k, fresh){
   kind = k;
   document.querySelectorAll("#kindSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === k)));
   $("qtyRow").hidden = k !== "expense"; $("itemDiscField").hidden = k !== "expense"; $("sizeField").hidden = k !== "expense";
-  $("shopField").hidden = k !== "expense";
+  $("shopField").hidden = k !== "expense"; $("incRow").hidden = k !== "income";
   $("savRow").hidden = k !== "saving";
   $("noteField").hidden = k === "saving";
   $("bizField").hidden = k === "saving";
@@ -1609,6 +1616,7 @@ function setKind(k, fresh){
   fillPick(pk.unit, [{values: withAll(freq(entries, e => e.unit), DEF.units)}], fresh ? "" : undefined);
   fillPick(pk.shop, [{values: withAll(freq(entries.filter(e => e.kind === "expense"), e => e.shop), DEF.shops)}], fresh ? "" : undefined);
   fillPick(pk.group, [{values: groupList()}], "");
+  fillPick(pk.payer, [{values: freq(entries.filter(e => e.kind === "income"), e => e.payer)}], fresh ? "" : undefined);
   fillPays();
   fillAcc("");
   showBillUI();
@@ -1631,7 +1639,7 @@ onPick(pk.note, () => {
   if (zz){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   updateAmount(); showSize();
 });
-onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc);
+onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc); onPick(pk.payer);
 $("fPay").addEventListener("change", () => fillAcc(""));
 // fAmount is always what is paid for this item; the item discount comes off the full price.
 let itemGross = 0;
@@ -1709,7 +1717,8 @@ function openForm(e){
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
-    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || "");
+    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || "";
+    if (e.src === "sheet") $("incRow").hidden = true; // rows typed in the sheet's year tab have no time/name columns
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
     if (e.pay) $("fPay").value = e.pay;
@@ -1763,6 +1772,7 @@ $("entryForm").addEventListener("submit", async ev => {
     const idc = itemDiscNow(); if (idc > 0) base.itemDisc = idc;
     const sz = parseFloat($("fSize").value); if (sz > 0){ base.size = sz; base.sizeUnit = $("fSizeUnit").value; }
   }
+  if (kind === "income"){ const t = $("fTime").value, py = pickVal(pk.payer); if (t) base.time = t; if (py) base.payer = py; }
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด") base.account = acc;
@@ -1964,7 +1974,7 @@ $("billSave").addEventListener("click", async () => {
 })();
 
 /* ---------- CSV export / restore ---------- */
-const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"],["itemDisc","ส่วนลดรายการ"],["size","ขนาดบรรจุ"],["sizeUnit","หน่วยขนาด"]];
+const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"],["itemDisc","ส่วนลดรายการ"],["size","ขนาดบรรจุ"],["sizeUnit","หน่วยขนาด"],["time","เวลา"],["payer","ชื่อคนจ่าย"]];
 const KIND_TH = {income: "รายรับ", expense: "ค่าใช้จ่าย", saving: "ออม+ลงทุน"};
 $("exportBtn").addEventListener("click", () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
@@ -2014,7 +2024,7 @@ $("restoreFile").addEventListener("change", async ev => {
     const k = KIND_BY_TH[get(r, "kindTh")], d = parseDate(get(r, "date")), a = parseAmt(get(r, "amount"));
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind: k, date: d, ym: ymOf(d), name: get(r, "name"), amount: a, updatedAt: new Date().toISOString()};
-    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId","sizeUnit"]){ const v = get(r, key); if (v) e[key] = v; }
+    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId","sizeUnit","time","payer"]){ const v = get(r, key); if (v) e[key] = v; }
     for (const key of ["unitPrice","qty","disc","itemDisc","size"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
     if (k === "saving" && e.side !== "ขาย") e.side = "ซื้อ";
     if (e.biz === PERSONAL) delete e.biz;
