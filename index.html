@@ -234,8 +234,10 @@ dialog form{display:grid;gap:10px;padding:16px;overflow:auto}
 .x{border:0;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--muted);width:36px;height:36px}
 .snap{display:grid;gap:6px;background:var(--sunk);border-radius:8px;padding:8px 10px}
 .snapitems{display:grid;gap:6px;background:var(--surface);border-radius:8px;padding:8px 10px}
-.snapitems .row{display:grid;grid-template-columns:minmax(0,1fr) 88px auto;gap:6px;align-items:center}
+.snapitems .row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;border-top:1px solid var(--line);padding-top:6px;gap:6px;align-items:center}
 .snapitems .row input{min-width:0;padding:6px 8px;font-size:.9rem}
+.snapitems .row input.n{grid-column:1 / -1}
+.snapitems .row input.q{text-align:center}
 .snapitems .row input.p{text-align:right;font-variant-numeric:tabular-nums}
 .snapitems .row .cat{grid-column:1 / -1;font-size:.72rem;color:var(--muted);margin:-4px 0 4px 2px}
 .snapitems .row button{border:0;background:transparent;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:0 4px}
@@ -467,7 +469,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="hint" id="snapHint"></div>
       <div class="toast" id="snapMsg" role="status"></div>
       <div id="snapItemsBox" class="snapitems" hidden>
-        <div class="bill-head"><strong>สินค้าที่อ่านได้</strong><span class="hint">แก้ชื่อหรือราคาได้ กด × เพื่อตัดทิ้ง</span></div>
+        <div class="bill-head"><strong>สินค้าที่อ่านได้</strong><span class="hint">แก้ได้ · × ตัดทิ้ง</span></div>
         <div id="snapItems"></div>
         <div class="bill-sum" id="snapSum"></div>
         <div class="actions"><button class="btn primary" type="button" id="snapToBill">เพิ่มทั้งหมดลงบิล</button></div>
@@ -2089,7 +2091,7 @@ function matchPast(name){
   return score >= 0.55 ? best : null;
 }
 function showSnapItems(items, total, disc){
-  snapRows = items.map(it => { const m = matchPast(it.name); return {name: m ? m.note : it.name, price: it.price, cat: m ? m.name : "", biz: m ? bizOf(m) : ""}; });
+  snapRows = items.map(it => { const m = matchPast(it.name); return {name: m ? m.note : it.name, price: it.price, qty: it.qty || 1, check: it.check || "", cat: m ? m.name : "", biz: m ? bizOf(m) : ""}; });
   snapTotal = total; snapDisc = disc;
   drawSnapItems();
   $("snapItemsBox").hidden = false;
@@ -2098,12 +2100,18 @@ function drawSnapItems(){
   const box = $("snapItems"); box.textContent = "";
   snapRows.forEach((r, i) => {
     const row = el("div", "row");
-    const n = document.createElement("input"); n.value = r.name; n.setAttribute("aria-label", "ชื่อสินค้า"); n.addEventListener("input", () => { r.name = n.value; });
+    const n = document.createElement("input"); n.className = "n"; n.value = r.name; n.setAttribute("aria-label", "ชื่อสินค้า"); n.addEventListener("input", () => { r.name = n.value; });
+    const q = document.createElement("input"); q.className = "q"; q.type = "number"; q.min = "1"; q.step = "1"; q.inputMode = "numeric"; q.value = r.qty; q.setAttribute("aria-label", "จำนวน"); q.title = "จำนวน";
     const p = document.createElement("input"); p.className = "p"; p.type = "number"; p.step = "0.01"; p.inputMode = "decimal"; p.value = r.price.toFixed(2); p.setAttribute("aria-label", "ราคา");
     p.addEventListener("input", () => { r.price = parseFloat(p.value) || 0; snapSum(); });
     const x = el("button", "", "×"); x.type = "button"; x.setAttribute("aria-label", "ตัดรายการนี้ทิ้ง"); x.addEventListener("click", () => { snapRows.splice(i, 1); drawSnapItems(); });
-    row.append(n, p, x);
-    row.append(el("div", "cat", r.cat ? `หมวด ${r.cat} (เคยบันทึกไว้)` : "หมวด: ใช้ตามช่องหมวดด้านล่าง"));
+    const info = el("div", "cat");
+    const note = () => { info.textContent = `${r.qty > 1 ? `ชิ้นละ ${fmt(r.price / r.qty)} · ` : ""}${r.cat ? `หมวด ${r.cat} (เคยบันทึกไว้)` : "หมวด: ใช้ตามช่องหมวดด้านล่าง"}`;
+      if (r.check) info.append(el("div", "warn", "⚠ " + r.check + " ตรวจจำนวนหรือราคาอีกที")); };
+    q.addEventListener("input", () => { r.qty = Math.max(1, parseInt(q.value) || 1); r.check = ""; note(); });
+    p.addEventListener("input", () => { r.check = ""; note(); });
+    note();
+    row.append(n, q, p, x, info);
     box.append(row);
   });
   snapSum();
@@ -2124,6 +2132,7 @@ $("snapToBill").addEventListener("click", () => {
   if (rows.some(r => !r.cat) && !formCat){ toast("เลือกหมวดในช่องหมวดก่อน (ใช้กับรายการที่ยังไม่มีหมวด)", true); $("fNameQ")?.focus(); return; }
   for (const r of rows){
     const it = {name: r.cat || formCat, amount: Math.round(r.price * 100) / 100, biz: r.biz || curBiz(), note: r.name.trim()};
+    if (r.qty > 1){ it.qty = r.qty; it.unitPrice = Math.round(r.price / r.qty * 100) / 100; }
     bill.push(it);
   }
   if (snapDisc && !$("billDisc").value){ $("billDisc").value = snapDisc; $("billDiscType").value = "baht"; }
@@ -2198,7 +2207,7 @@ async function prepImage(file, mode){
 }
 function parseReceiptText(text){
   // Thai digits to 0-9, and "189 00" (dot lost by OCR) back to "189.00"
-  text = text.replace(/[๐-๙]/g, d => "๐๑๒๓๔๕๖๗๘๙".indexOf(d)).replace(/(\d) (\d{2})(?!\d)/g, "$1.$2");
+  text = text.replace(/[๐-๙]/g, d => "๐๑๒๓๔๕๖๗๘๙".indexOf(d)).replace(/(^|[^.,\d])(\d{1,3}(?:,\d{3})*|\d+) (\d{2})[ \t]*$/gm, "$1$2.$3");
   const lines = text.split(/\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   const nums = l => (l.match(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+\.\d{2}|\d+/g) || []).map(x => parseFloat(x.replace(/,/g, ""))).filter(v => v > 0 && v < 10000000);
   let amount = NaN;
@@ -2234,24 +2243,82 @@ function parseReceiptText(text){
 function parseReceiptItems(lines){
   const skip = /total|รวม|ยอด|สุทธิ|vat|ภาษี|tax|เงินสด|cash|ทอน|change|ชำระ|บัตร|card|credit|เครดิต|qr|promptpay|พร้อมเพย์|โอน|ปัดเศษ|round|รายการ|items?\b|qty|จำนวนชิ้น|ใบเสร็จ|receipt|tel|โทร|เลขที่|pos|member|สมาชิก|แต้ม|point/i;
   const discRe = /ส่วนลด|discount|ลด\b/i;
-  const items = []; let disc = 0;
+  // a number followed by one of these is a pack size (25 ชุด, 1,000 g), never a quantity
+  const SIZE = "(?:g|gm|gr|kg|ml|l|lt|cc|oz|กรัม|กก|มล|ลิตร|ชุด|ชิ้น|ซอง|ถุง|ขวด|กล่อง|แพ็ค|แพค|pack|pcs?|ใบ|ม้วน|แผ่น|ห่อ|กระป๋อง|หลอด|ฟอง|ลูก|ตัว|อัน|cm|mm|m|นิ้ว)(?![A-Za-z])";
+  const MONEY = "\\d{1,3}(?:,\\d{3})*\\.\\d{2}|\\d+\\.\\d{2}";
+  const num = x => parseFloat(String(x).replace(/,/g, ""));
+  const items = []; let disc = 0, pendingName = "";
+  const isSkip = t => { const h = t.replace(/^[^A-Za-zก-๙]+/, ""); return skip.test(h) && (h.length < 10 || new RegExp("^(?:" + skip.source + ")", "i").test(h)); };
+  const clean = t => t
+    .replace(/^[\s\/\\\-_.:;,'"`~!@#$%^&*()\[\]{}<>=+]+/, "")
+    .replace(/^[\/\\\-_.:;,'"`~|]+\s*/, "")
+    .replace(/[\s\-_.:;,|@xX×*]+$/, "").trim();
+  const letters = t => (t.match(/[A-Za-zก-๙]/g) || []).length;
+  // "2 x 22.50", "2 @ 22.50", "x2", "2X" — the quantity (and unit price) on its own
+  const qtyAt = new RegExp(`(?:^|\\s)(\\d{1,3})\\s*[xX×@*]\\s*(${MONEY}|\\d+)(?=\\s|$)`);
+  const qtyX = /(?:^|\s)[xX×]\s*(\d{1,3})(?=\s|$)|(?:^|\s)(\d{1,3})\s*[xX×](?=\s|$)/;
+  const qtyLine = new RegExp(`^(\\d{1,3})\\s*(?:[xX×@*]|ea|ชิ้น\\s*[xX@])\\s*(${MONEY}|\\d+)(?:\\s+(${MONEY}))?$`, "i");
   for (const raw of lines){
     const l = raw.replace(/[|¦]/g, " ").replace(/\s+/g, " ").trim();
-    const m = l.match(/^(.*?)\s*(-?\d{1,3}(?:,\d{3})*\.\d{2}|-?\d+\.\d{2})\s*[A-Za-z*#]{0,2}\s*$/);
-    if (!m) continue;
-    const price = Math.abs(parseFloat(m[2].replace(/,/g, "")));
-    if (!(price > 0)) continue;
-    if (discRe.test(m[1]) || m[2].startsWith("-")){ disc += price; continue; }
-    const head = m[1].replace(/^[^A-Za-zก-๙]+/, "");
-    if (skip.test(head) && (head.length < 10 || new RegExp("^(?:" + skip.source + ")", "i").test(head))) continue;
-    let name = m[1]
-      .replace(/^[\s\/\\\-_.:;,'"`~!@#$%^&*()\[\]{}<>=+]+/, "")       // junk the camera reads before the text
-      .replace(/^(?:\d+\s+){1,2}/, "")                                  // line or quantity numbers at the start
-      .replace(/^[\/\\\-_.:;,'"`~|]+\s*/, "")
-      .replace(/\s+[@xX×]\s*[\d.,]+\s*$/, "")                          // "@ 15.00" unit price at the end
-      .replace(/[\s\-_.:;,|]+$/, "").trim();
-    if ((name.match(/[A-Za-zก-๙]/g) || []).length < 2) continue;
-    items.push({name, price});
+    // quantity on its own line, belonging to the item above (or to a name line with no price)
+    const ql = l.match(qtyLine);
+    if (ql){
+      const q = +ql[1], u = num(ql[2]), tot = ql[3] ? num(ql[3]) : Math.round(q * u * 100) / 100;
+      if (pendingName){ items.push({name: pendingName, price: tot, qty: q, unit: u}); pendingName = ""; }
+      else if (items.length){
+        const it = items[items.length - 1];
+        if (it.qty === 1){
+          it.qty = q; it.unit = u;
+          // the line above showed the price of one: the line total is qty × that
+          if (ql[3] || Math.abs(it.price - u) < 0.01) it.price = tot;
+          else if (Math.abs(q * u - it.price) > 0.05) it.check = `${q} × ${u.toFixed(2)} = ${(q * u).toFixed(2)} ไม่ตรงกับ ${it.price.toFixed(2)}`;
+        }
+      }
+      continue;
+    }
+    const m = l.match(new RegExp(`^(.*?)\\s*(-?(?:${MONEY}))\\s*[A-Za-z*#]{0,2}\\s*$`));
+    if (!m){
+      // a product name whose price comes on the next line
+      if (letters(l) >= 3 && !isSkip(l) && !/\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/.test(l)) pendingName = clean(l.replace(/^(?:\d+\s+){1,2}/, ""));
+      else pendingName = "";
+      continue;
+    }
+    const price = Math.abs(num(m[2]));
+    if (!(price > 0)){ pendingName = ""; continue; }
+    if (discRe.test(m[1]) || m[2].startsWith("-")){ disc += price; pendingName = ""; continue; }
+    if (isSkip(m[1])){ pendingName = ""; continue; }
+    let body = m[1], qty = 0, unit = 0;
+    // 1) "2 @ 22.50" or "2 x 22.50" anywhere before the price
+    let k = body.match(qtyAt);
+    if (k){ qty = +k[1]; unit = num(k[2]); body = body.replace(k[0], " "); }
+    // 2) "x2" / "2x"
+    if (!qty && (k = body.match(qtyX))){ qty = +(k[1] || k[2]); body = body.replace(k[0], " "); }
+    // 3) a column: "... 2 22.50" (qty then unit price) or a lone whole number just before the price
+    if (!qty && (k = body.match(new RegExp(`\\s(\\d{1,3})\\s+(${MONEY})\\s*$`)))){ qty = +k[1]; unit = num(k[2]); body = body.slice(0, k.index); }
+    if (!qty && (k = body.match(new RegExp(`\\s(\\d{1,3})\\s*$`))) && !new RegExp(`\\d\\s*${SIZE}\\s*$`, "i").test(body)){ qty = +k[1]; body = body.slice(0, k.index); }
+    // 4) quantity printed first: "7 SP ถ้วย…", "1 1 เจ …" (line number then quantity)
+    const lead = body.replace(/^[^\dA-Za-zก-๙]+/, "").match(/^((?:\d{1,3}\s+){1,2})(?=\D)/);
+    if (lead){
+      const ns = lead[1].trim().split(/\s+/).map(Number);
+      const rest = body.replace(/^[^\dA-Za-zก-๙]+/, "").slice(lead[0].length);
+      if (!qty && !new RegExp(`^${SIZE}`, "i").test(rest)) qty = ns[ns.length - 1];
+      body = rest;
+    }
+    if (pendingName && letters(body) < 2) body = pendingName;
+    pendingName = "";
+    const name = clean(body);
+    if (letters(name) < 2) continue;
+    if (!(qty >= 1 && qty <= 999)) qty = 1;
+    // check what the receipt says against itself: qty × unit price should be the line price
+    let check = "";
+    if (unit > 0){
+      if (Math.abs(qty * unit - price) > 0.05){
+        const q2 = price / unit;
+        if (Math.abs(q2 - Math.round(q2)) < 0.02 && Math.round(q2) >= 1){ qty = Math.round(q2); }
+        else check = `${qty} × ${unit.toFixed(2)} = ${(qty * unit).toFixed(2)} ไม่ตรงกับ ${price.toFixed(2)}`;
+      }
+    }
+    items.push({name, price, qty, unit: unit || Math.round(price / qty * 100) / 100, check});
   }
   return {items, disc: Math.round(disc * 100) / 100};
 }
