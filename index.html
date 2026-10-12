@@ -124,11 +124,16 @@ table.ledger tr.future td{opacity:.6}
 .cal button .d{font-size:.8rem;font-weight:600}
 .cal button .x{font-size:.7rem;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal button .heat{position:absolute;inset:0;background:var(--exp);pointer-events:none}
-.cal button > span:not(.heat){position:relative}
+.cal button > span:not(.heat):not(.cross){position:relative}
 .cal button .inc{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--inc)}
 .cal button.today{outline:2px solid var(--fg);outline-offset:-2px}
 .cal button.sel{border-color:var(--fg);box-shadow:inset 0 0 0 2px var(--fg)}
 .cal button.blank{visibility:hidden}
+.cal button .cross{position:absolute;inset:0;display:grid;place-items:center;font-size:2.1rem;font-weight:300;line-height:1;color:var(--accent);opacity:.6;pointer-events:none}
+.cal button.chk{border-color:var(--accent)}
+.cal button{-webkit-touch-callout:none;user-select:none}
+.cal-foot .xk{color:var(--accent);font-weight:700}
+.chip.chk-btn.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .cal-foot{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:8px;font-size:.78rem;color:var(--muted)}
 .cal-foot .k{display:inline-flex;align-items:center;gap:4px}
 .cal-foot .dot{width:7px;height:7px;border-radius:50%;background:var(--inc);display:inline-block}
@@ -851,6 +856,13 @@ function renderIncome(P){
 }
 
 // Month at a glance: each day's spending, shaded by how much, with a dot on days with income.
+// Days the user has crossed off after re-checking them; kept in settings so every device sees them.
+const isChecked = iso => (settings.checkedDays || []).includes(iso);
+function toggleChecked(iso){
+  const s = new Set(settings.checkedDays || []);
+  if (s.has(iso)) s.delete(iso); else s.add(iso);
+  store.setSetting("checkedDays", [...s].sort());
+}
 function calendar(box, ym, onPick){
   box.textContent = "";
   const [y, m] = ym.split("-").map(Number);
@@ -872,9 +884,17 @@ function calendar(box, ym, onPick){
     if (v > 0){ const h = el("span", "heat"); h.style.opacity = (0.1 + 0.45 * v / max).toFixed(2); b.append(h); }
     b.append(el("span", "d", String(d)), el("span", "x", v ? fmt0(v) : ""));
     if (inc.get(d)) b.append(el("span", "inc"));
-    b.setAttribute("aria-label", `${thaiDate(iso)} รายจ่าย ${fmt(v)} บาท${inc.get(d) ? ` รายรับ ${fmt(inc.get(d))} บาท` : ""}`);
-    b.title = `${weekday(iso)} ${thaiDate(iso)}\nรายจ่าย ${fmt(v)} บาท${inc.get(d) ? `\nรายรับ ${fmt(inc.get(d))} บาท` : ""}`;
-    b.addEventListener("click", () => onPick(iso));
+    const ck = isChecked(iso);
+    if (ck){ b.classList.add("chk"); b.append(el("span", "cross", "✕")); }
+    b.setAttribute("aria-label", `${thaiDate(iso)} รายจ่าย ${fmt(v)} บาท${inc.get(d) ? ` รายรับ ${fmt(inc.get(d))} บาท` : ""}${ck ? " เช็คแล้ว" : ""}`);
+    b.title = `${weekday(iso)} ${thaiDate(iso)}\nรายจ่าย ${fmt(v)} บาท${inc.get(d) ? `\nรายรับ ${fmt(inc.get(d))} บาท` : ""}${ck ? "\n✕ เช็คแล้ว" : ""}\nกดค้างเพื่อทำเครื่องหมายว่าเช็คแล้ว`;
+    // press and hold crosses the day off without opening it
+    let hold = null, held = false;
+    const cancel = () => clearTimeout(hold);
+    b.addEventListener("pointerdown", () => { held = false; hold = setTimeout(() => { held = true; toggleChecked(iso); }, 550); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(t => b.addEventListener(t, cancel));
+    b.addEventListener("contextmenu", ev => ev.preventDefault());
+    b.addEventListener("click", () => { if (held){ held = false; return; } onPick(iso); });
     g.append(b);
   }
   box.append(g);
@@ -882,11 +902,17 @@ function calendar(box, ym, onPick){
   const k1 = el("span", "k"); k1.append(el("span", "ramp"), document.createTextNode("สีเข้ม = ใช้เงินมาก"));
   const k2 = el("span", "k"); k2.append(el("span", "dot"), document.createTextNode("มีรายรับ"));
   const tot = [...exp.values()].reduce((a, b) => a + b, 0), n = exp.size;
-  foot.append(k1, k2, el("span", "", `ใช้จ่าย ${n} วัน · เฉลี่ยวันละ ${fmt0(n ? tot / days : 0)} บาท`));
+  const withData = new Set([...exp.keys(), ...inc.keys()]);
+  const nChk = [...withData].filter(d => isChecked(`${ym}-${pad(d)}`)).length;
+  const k3 = el("span", "k"); k3.append(el("span", "xk", "✕"), document.createTextNode(`เช็คแล้ว ${nChk}/${withData.size} วัน`));
+  foot.append(k1, k2, k3, el("span", "", `ใช้จ่าย ${n} วัน · เฉลี่ยวันละ ${fmt0(n ? tot / days : 0)} บาท`));
   if (dayPick && dayPick.startsWith(ym)){
     const c = el("button", "chip", `เฉพาะ ${weekday(dayPick)} ${thaiDate(dayPick)} ✕`); c.type = "button"; c.setAttribute("aria-pressed", "true");
     c.addEventListener("click", () => { dayPick = ""; render(); });
-    foot.append(c);
+    const on = isChecked(dayPick);
+    const t = el("button", "chip chk-btn" + (on ? " on" : ""), on ? "✕ เช็ควันนี้แล้ว (แตะเพื่อยกเลิก)" : "☐ ทำเครื่องหมายว่าเช็คแล้ว"); t.type = "button"; t.setAttribute("aria-pressed", String(on));
+    const day = dayPick; t.addEventListener("click", () => toggleChecked(day));
+    foot.append(c, t);
   }
   box.append(foot);
 }
