@@ -147,6 +147,11 @@ fieldset.groups legend{padding:0;margin-bottom:4px}
 #fuGroups{display:flex;flex-wrap:wrap;gap:6px 14px}
 #fuGroups label{display:flex;gap:6px;align-items:center;font-size:.9rem;cursor:pointer}
 #fuGroups input{width:auto;margin:0}
+label.check{display:flex;gap:8px;align-items:center;font-size:.9rem;cursor:pointer}
+label.check input{width:auto;margin:0}
+.compare{display:grid;gap:8px;margin-top:4px}
+.compare .gap{font-weight:600}
+.who-p{color:var(--inc)}
 .fund .h{display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap}
 
 /* forms */
@@ -283,6 +288,7 @@ details summary{cursor:pointer;font-weight:500}
           <div></div>
         </div>
         <fieldset class="field groups"><legend>นับยอดจากกลุ่มออม (เลือกได้หลายกลุ่ม)</legend><div id="fuGroups"></div></fieldset>
+        <label class="check"><input type="checkbox" id="fuShared"> ออมด้วยกันกับแฟน (นับยอดที่บันทึกว่า "แฟน" ออมด้วย และเทียบกันให้ดู)</label>
         <div class="actions"><button class="btn primary" type="submit">บันทึกเป้าหมาย</button><button class="btn" type="button" id="fundCancel">ยกเลิก</button><button class="btn danger" type="button" id="fundDel" hidden>ลบเป้าหมายนี้</button></div>
       </form>
       <div id="sFunds"></div>
@@ -396,7 +402,8 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fUnit">ราคา/หน่วย</label><input id="fUnit" type="number" step="0.01" min="0" inputmode="decimal"></div>
     </div>
     <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
-    <div class="two" id="savRow" hidden>
+    <div class="three" id="savRow" hidden>
+      <div class="field"><label for="fWho">ใครออม</label><select id="fWho"><option value="">ฉัน</option><option value="แฟน">แฟน</option></select></div>
       <div class="field"><label for="fSide">ซื้อ/ขาย</label><select id="fSide"><option>ซื้อ</option><option>ขาย</option></select></div>
       <div class="field"><label for="fGroup">กลุ่ม/กองทุน</label><div class="pick"><select id="fGroup"></select><input id="fGroupNew" hidden placeholder="ชื่อกลุ่มใหม่"></div></div>
     </div>
@@ -459,7 +466,10 @@ const thaiDate = iso => { const [y,m,d] = iso.split("-").map(Number); return `${
 const addMonths = (ym, n) => { let [y,m] = ym.split("-").map(Number); m += n; while (m < 1){ m += 12; y--; } while (m > 12){ m -= 12; y++; } return `${y}-${pad(m)}`; };
 const signedSaving = e => (e.side === "ขาย" ? -1 : 1) * (Number(e.amount)||0);
 
-let entries = [];
+// entries: my own money. partner: what แฟน saved, entered here only to track shared goals,
+// so it never counts in my income, spending or investment totals.
+const PARTNER = "แฟน";
+let entries = [], partner = [], allEntries = [];
 let settings = {};
 let store = null;
 let page = "overall";
@@ -717,7 +727,8 @@ function renderSaving(P){
   });
   if (savPick && !groups.some(([g]) => g === savPick.label) && !savPick.fund){ const c = el("button", "chip", savPick.label); c.type = "button"; c.setAttribute("aria-pressed", "true"); box.append(c); }
   $("sAllYears").setAttribute("aria-pressed", String(savAllYears));
-  const src = savAllYears ? all : L;
+  let src = savAllYears ? all : L;
+  if (savPick?.withPartner) src = src.concat(partner.filter(e => e.kind === "saving" && (savAllYears || inPeriod(e))));
   const rows = savPick ? src.filter(e => savPick.groups.has(groupKey(e.group))) : src;
   $("sListTitle").textContent = savPick ? `รายการ ${savPick.label}${savAllYears ? " ทุกปี" : " " + periodLabel()}` : "รายการลงทุน/ออม";
   if (savPick) savingLedger($("sList"), rows); else entryList($("sList"), rows, "saving");
@@ -725,8 +736,8 @@ function renderSaving(P){
 // Check one group (or a goal's groups): oldest first, with the running total, so a missing or
 // mistyped row is easy to spot.
 let savPick = null, savAllYears = false;
-function pickSavGroups(groups, label, fromChip){
-  savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1} : null;
+function pickSavGroups(groups, label, fromChip, withPartner){
+  savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1 || !!withPartner, withPartner: !!withPartner} : null;
   if (groups && !fromChip) savAllYears = true;
   if (page !== "saving") go("saving"); else render();
   if (groups && !fromChip) $("sListTitle").scrollIntoView({behavior: "smooth", block: "start"});
@@ -737,23 +748,27 @@ function savingLedger(box, rows){
   rows = [...rows].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   if (!rows.length){ box.append(el("div", "empty", "ไม่มีรายการของกลุ่มนี้ในช่วงที่เลือก ลองกด \"ดูทุกปี\"")); return; }
   const t = el("table", "ledger"), hd = el("thead"), hr = el("tr");
-  ["วันที่", "แอป/บัญชี", "กลุ่ม", "ซื้อ/ขาย", "จำนวน", "ยอดสะสม", "ที่มา"].forEach((x, i) => hr.append(el("th", i === 4 || i === 5 ? "n" : "", x)));
+  const both = rows.some(e => e.who === PARTNER);
+  ["วันที่", ...(both ? ["ใคร"] : []), "แอป/บัญชี", "กลุ่ม", "ซื้อ/ขาย", "จำนวน", "ยอดสะสม", "ที่มา"].forEach(x => hr.append(el("th", x === "จำนวน" || x === "ยอดสะสม" ? "n" : "", x)));
   hd.append(hr); t.append(hd);
   const tb = el("tbody"); let run = 0, lastY = "";
   const yearTotals = new Map();
   for (const e of rows){
     const y = e.date.slice(0, 4);
-    if (y !== lastY){ lastY = y; const yr = el("tr", "year"); const td = el("td", "", "ปี " + y); td.colSpan = 7; yr.append(td); tb.append(yr); }
+    if (y !== lastY){ lastY = y; const yr = el("tr", "year"); const td = el("td", "", "ปี " + y); td.colSpan = both ? 8 : 7; yr.append(td); tb.append(yr); }
     const v = signedSaving(e); run += v; yearTotals.set(y, (yearTotals.get(y) || 0) + v);
     const tr = el("tr", "click" + (e.date > todayISO ? " future" : ""));
-    tr.append(el("td", "", thaiDate(e.date)), el("td", "", e.name || "—"), el("td", "", groupKey(e.group) || "—"), el("td", e.side === "ขาย" ? "neg" : "", e.side || "ซื้อ"),
+    tr.append(el("td", "", thaiDate(e.date)));
+    if (both) tr.append(el("td", e.who === PARTNER ? "who-p" : "", e.who === PARTNER ? PARTNER : "ฉัน"));
+    tr.append(el("td", "", e.name || "—"), el("td", "", groupKey(e.group) || "—"), el("td", e.side === "ขาย" ? "neg" : "", e.side || "ซื้อ"),
       el("td", "n" + (v < 0 ? " neg" : ""), (v < 0 ? "−" : "") + fmt(Math.abs(v))), el("td", "n", fmt(run)), el("td", "muted", e.src === "sheet" ? (e.tab ? `ชีต แท็บ ${e.tab}` : "ชีต") : "แอป"));
     tr.addEventListener("click", () => openForm(e));
     tb.append(tr);
   }
   t.append(tb);
   const tf = el("tfoot"), fr = el("tr");
-  const c1 = el("td", "", `รวม ${rows.length} รายการ · ` + [...yearTotals].map(([y, v]) => `ปี ${y}: ${fmt0(v)}`).join(", ")); c1.colSpan = 5;
+  const per = both ? ` · ฉัน ${fmt0(sumSaving(rows.filter(e => e.who !== PARTNER && e.date <= todayISO)))} · ${PARTNER} ${fmt0(sumSaving(rows.filter(e => e.who === PARTNER && e.date <= todayISO)))}` : "";
+  const c1 = el("td", "", `รวม ${rows.length} รายการ · ` + [...yearTotals].map(([y, v]) => `ปี ${y}: ${fmt0(v)}`).join(", ") + per); c1.colSpan = both ? 6 : 5;
   fr.append(c1, el("td", "n", fmt(run)), el("td")); tf.append(fr); t.append(tf);
   const sc = el("div", "scroll"); sc.append(t); box.append(sc);
 }
@@ -805,9 +820,38 @@ function renderShop(P){
 // A goal counts one or more saving groups. Older goals stored a single "group".
 const fundGroups = f => f.groups && f.groups.length ? f.groups : [f.group].filter(Boolean);
 const groupKey = g => String(g || "").replace(/\s+/g, " ").trim();
-function fundRows(f){ const gs = new Set(fundGroups(f).map(groupKey)); return entries.filter(e => e.kind === "saving" && gs.has(groupKey(e.group)) && e.date <= todayISO); }
-function fundSaved(f){ return fundRows(f).reduce((a, e) => a + signedSaving(e), 0); }
-function fundYears(f){ const y = new Map(); fundRows(f).forEach(e => { const k = e.date.slice(0,4); y.set(k, (y.get(k)||0) + signedSaving(e)); }); return [...y.entries()].sort(); }
+const fundShared = f => f.shared ?? f.id === "fjp";
+function fundRows(f, who){
+  const gs = new Set(fundGroups(f).map(groupKey));
+  const src = who === "me" ? entries : who === "partner" ? partner : fundShared(f) ? allEntries : entries;
+  return src.filter(e => e.kind === "saving" && gs.has(groupKey(e.group)) && e.date <= todayISO);
+}
+const sumSaving = list => list.reduce((a, e) => a + signedSaving(e), 0);
+function fundSaved(f){ return sumSaving(fundRows(f)); }
+function fundYears(f, who){ const y = new Map(); fundRows(f, who).forEach(e => { const k = e.date.slice(0,4); y.set(k, (y.get(k)||0) + signedSaving(e)); }); return [...y.entries()].sort(); }
+// Me vs partner, month by month (latest 6 months with any saving).
+function fundCompare(f){
+  const me = sumSaving(fundRows(f, "me")), pa = sumSaving(fundRows(f, "partner"));
+  const box = el("div", "compare");
+  const gap = me - pa;
+  const top = el("div", "two");
+  const card = (label, v, cls) => { const c = el("div", "tile " + cls); c.append(el("span", "k", label), el("span", "v num", fmt0(v))); return c; };
+  top.append(card("ฉันออม", me, "sav"), card(PARTNER + "ออม", pa, "inc"));
+  box.append(top);
+  box.append(el("div", "gap", gap === 0 ? "ออมเท่ากันพอดี" : gap > 0 ? `ฉันออมมากกว่า${PARTNER} ${fmt0(gap)} บาท` : `${PARTNER}ออมมากกว่าฉัน ${fmt0(-gap)} บาท`));
+  const months = new Map();
+  fundRows(f).forEach(e => { const m = e.date.slice(0,7); const v = months.get(m) || {me: 0, pa: 0}; if (e.who === PARTNER) v.pa += signedSaving(e); else v.me += signedSaving(e); months.set(m, v); });
+  const ms = [...months.entries()].sort((a, b) => a[0] < b[0] ? 1 : -1).slice(0, 6);
+  if (ms.length){
+    const t = el("table"), hd = el("thead"), hr = el("tr");
+    ["เดือน", "ฉัน", PARTNER, "ต่างกัน"].forEach((x, i) => hr.append(el("th", i ? "n" : "", x))); hd.append(hr); t.append(hd);
+    const tb = el("tbody");
+    ms.forEach(([m, v]) => { const tr = el("tr"); tr.append(el("td", "", `${TH_ABBR[Number(m.slice(5)) - 1]} ${m.slice(0,4)}`), el("td", "n", fmt0(v.me)), el("td", "n", fmt0(v.pa)), el("td", "n" + (v.me - v.pa < 0 ? " neg" : ""), (v.me - v.pa > 0 ? "+" : "") + fmt0(v.me - v.pa))); tb.append(tr); });
+    t.append(tb); box.append(t);
+  }
+  if (!pa) box.append(el("div", "hint", `ยังไม่มียอดของ${PARTNER} กด ＋ เพิ่มรายการ เลือก ลงทุน/ออม แล้วตั้ง "ใครออม" เป็น ${PARTNER}`));
+  return box;
+}
 function renderFunds(box, compact){
   box.textContent = "";
   const funds = settings.funds || [];
@@ -831,11 +875,13 @@ function renderFunds(box, compact){
       }
     } else if (target) info.push("ถึงเป้าแล้ว 🎉");
     d.append(h, m, el("div", "hint", info.join(" · ")));
+    if (fundShared(f) && !compact) d.append(fundCompare(f));
+    else if (fundShared(f)){ const me = sumSaving(fundRows(f, "me")), pa = sumSaving(fundRows(f, "partner")); d.append(el("div", "hint", `ฉัน ${fmt0(me)} · ${PARTNER} ${fmt0(pa)} · ${me === pa ? "เท่ากัน" : (me > pa ? "ฉันนำ " : PARTNER + "นำ ") + fmt0(Math.abs(me - pa)) + " บาท"}`)); }
     if (!compact){
       const b = el("button", "btn sm", "แก้ไข"); b.type = "button";
       b.addEventListener("click", () => openFund(f));
       const v = el("button", "btn sm", "ดูรายการ"); v.type = "button";
-      v.addEventListener("click", () => pickSavGroups(fundGroups(f), f.name));
+      v.addEventListener("click", () => pickSavGroups(fundGroups(f), f.name, false, fundShared(f)));
       const row = el("div", "actions"); row.append(v, b); d.append(row);
     }
     box.append(d);
@@ -845,7 +891,7 @@ let editingFund = null;
 function openFund(f){
   editingFund = f ? f.id : null;
   $("fundForm").hidden = false;
-  $("fuName").value = f?.name || ""; $("fuTarget").value = f?.target || ""; $("fuDue").value = f?.due || "";
+  $("fuName").value = f?.name || ""; $("fuTarget").value = f?.target || ""; $("fuDue").value = f?.due || ""; $("fuShared").checked = f ? fundShared(f) : false;
   const box = $("fuGroups"); box.textContent = "";
   const all = [...new Set(groupList().map(groupKey))];
   const chosen = new Set((f ? fundGroups(f) : []).map(groupKey));
@@ -860,7 +906,7 @@ $("fundForm").addEventListener("submit", ev => {
   ev.preventDefault();
   const groups = [...$("fuGroups").querySelectorAll("input:checked")].map(c => c.value);
   if (!groups.length){ $("fuGroups").querySelector("input")?.focus(); return; }
-  const f = {id: editingFund || "f" + Date.now().toString(36), name: $("fuName").value.trim(), group: groups[0], groups, target: Number($("fuTarget").value)||0, due: $("fuDue").value};
+  const f = {id: editingFund || "f" + Date.now().toString(36), name: $("fuName").value.trim(), group: groups[0], groups, target: Number($("fuTarget").value)||0, due: $("fuDue").value, shared: $("fuShared").checked};
   const funds = [...(settings.funds || [])];
   const i = funds.findIndex(x => x.id === f.id);
   if (i >= 0) funds[i] = f; else funds.push(f);
@@ -1147,7 +1193,7 @@ function openForm(e){
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || "");
-    $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || "");
+    $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
     if (e.pay) $("fPay").value = e.pay;
     fillAcc(e.account || "");
@@ -1191,7 +1237,7 @@ $("entryForm").addEventListener("submit", async ev => {
     const un = pickVal(pk.unit), sh = pickVal(pk.shop);
     if (un && q > 0) base.unit = un; if (sh) base.shop = sh;
   }
-  if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); }
+  if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด") base.account = acc;
   const out = [];
@@ -1225,11 +1271,11 @@ $("entryForm").addEventListener("submit", async ev => {
 });
 
 /* ---------- CSV export / restore ---------- */
-const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"]];
+const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"]];
 const KIND_TH = {income: "รายรับ", expense: "ค่าใช้จ่าย", saving: "ออม+ลงทุน"};
 $("exportBtn").addEventListener("click", () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-  const rows = [...entries].filter(e => e.src !== "sheet").sort((a,b) => a.date < b.date ? -1 : 1)
+  const rows = [...allEntries].filter(e => e.src !== "sheet").sort((a,b) => a.date < b.date ? -1 : 1)
     .map(e => CSV_COLS.map(([k]) => esc(k === "kindTh" ? KIND_TH[e.kind] : k === "biz" ? bizOf(e) : e[k])).join(","));
   const csv = "﻿" + [CSV_COLS.map(c => c[1]).join(","), ...rows].join("\n");
   const a = document.createElement("a");
@@ -1275,7 +1321,7 @@ $("restoreFile").addEventListener("change", async ev => {
     const k = KIND_BY_TH[get(r, "kindTh")], d = parseDate(get(r, "date")), a = parseAmt(get(r, "amount"));
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind: k, date: d, ym: ymOf(d), name: get(r, "name"), amount: a, updatedAt: new Date().toISOString()};
-    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId"]){ const v = get(r, key); if (v) e[key] = v; }
+    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who"]){ const v = get(r, key); if (v) e[key] = v; }
     for (const key of ["unitPrice","qty"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
     if (k === "saving" && e.side !== "ขาย") e.side = "ซื้อ";
     if (e.biz === PERSONAL) delete e.biz;
@@ -1396,7 +1442,7 @@ function initStore(){
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
-  store.subscribe(list => { entries = list; widenJapan(); render(); });
+  store.subscribe(list => { allEntries = list; entries = list.filter(e => e.who !== PARTNER); partner = list.filter(e => e.who === PARTNER); widenJapan(); render(); });
 
   // settings panel
   function showCfg(){
