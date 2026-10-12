@@ -156,6 +156,7 @@ table.ledger tr.future td{opacity:.6}
 .more{justify-self:center;margin-top:8px}
 
 table{border-collapse:collapse;width:100%;font-size:.88rem}
+.scroll table.cost{min-width:0}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -360,6 +361,14 @@ details summary{cursor:pointer;font-weight:500}
         <tbody id="mItems"></tbody><tfoot id="mItemsFoot"></tfoot>
       </table></div>
     </div>
+    <div class="panel">
+      <h2>ต้นทุนวัตถุดิบต่อ ml / g</h2>
+      <div class="hint">คิดจากยอดที่จ่ายจริงหลังหักส่วนลด ทุกครั้งที่ซื้อ (ไม่จำกัดเดือน) แนวโน้มเทียบกับครั้งก่อน ▲ แพงขึ้น ▼ ถูกลง</div>
+      <div class="scroll"><table class="cost">
+        <thead><tr><th>วัตถุดิบ</th><th class="n">ล่าสุด</th><th class="n">เฉลี่ย</th><th class="n">แนวโน้ม</th></tr></thead>
+        <tbody id="mCost"></tbody>
+      </table></div>
+    </div>
     <div class="panel"><h2>รายการของร้าน</h2><div class="list" id="mList"></div></div>
   </section>
 
@@ -437,6 +446,10 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field" id="unitField"><label for="fUnitName">หน่วย</label><div class="pick"><select id="fUnitName"></select><input id="fUnitNameNew" hidden placeholder="หน่วย"></div></div>
       <div class="field"><label for="fUnit">ราคา/หน่วย</label><input id="fUnit" type="number" step="0.01" min="0" inputmode="decimal"></div>
     </div>
+    <div class="field" id="sizeField"><label for="fSize">ขนาดต่อหน่วย (เช่น 1 ขวด = 500 ml) ไว้คิดต้นทุน</label>
+      <div class="pick" style="grid-template-columns:1fr 96px"><input id="fSize" type="number" step="any" min="0" inputmode="decimal" placeholder="เช่น 500"><select id="fSizeUnit" aria-label="หน่วยขนาด"><option>ml</option><option>g</option><option>l</option><option>kg</option><option>ชิ้น</option><option>ฟอง</option></select></div>
+      <div class="hint" id="sizeHint" hidden></div>
+    </div>
     <div class="field" id="itemDiscField"><label for="fItemDisc">ส่วนลดเฉพาะรายการนี้</label>
       <div class="pick" style="grid-template-columns:1fr 84px"><input id="fItemDisc" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"><select id="fItemDiscType" aria-label="หน่วยส่วนลดรายการ"><option value="baht">บาท</option><option value="pct">%</option></select></div>
       <div class="hint" id="itemDiscHint" hidden></div>
@@ -507,6 +520,15 @@ const bizOf = e => e.biz || (e.name === "Muan" ? "Muan" : PERSONAL);
 
 const $ = id => document.getElementById(id);
 const fmt = n => (Number(n)||0).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});
+// Package size: l and kg count as ml and g so prices compare across sizes.
+const SIZE_BASE = {ml: ["ml", 1], l: ["ml", 1000], g: ["g", 1], kg: ["g", 1000], "ชิ้น": ["ชิ้น", 1], "ฟอง": ["ฟอง", 1]};
+function costPer(e){
+  const s = Number(e.size), b = SIZE_BASE[e.sizeUnit || "ml"], a = Number(e.amount);
+  if (!(s > 0) || !b || !(a > 0)) return null;
+  const total = s * b[1] * (Number(e.qty) > 0 ? Number(e.qty) : 1);
+  return {per: a / total, base: b[0], total};
+}
+const fmtC = v => v >= 1 ? fmt(v) : (Number(v)||0).toLocaleString("th-TH", {minimumFractionDigits: 2, maximumFractionDigits: 4});
 const fmt0 = n => Math.round(Number(n)||0).toLocaleString("th-TH");
 const pad = n => String(n).padStart(2,"0");
 const ymOf = d => d.slice(0,7);
@@ -691,6 +713,7 @@ function entryItem(e, inBill){
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
+    if (e.size){ const c = costPer(e); tags.push(`${e.size} ${e.sizeUnit || "ml"}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
     if (payText(e)) tags.push(payText(e));
@@ -944,7 +967,26 @@ function renderShop(P){
   }
   const tf = $("mItemsFoot"); tf.textContent = "";
   if (sorted.length){ const tr = el("tr"); [["รวม", ""], ["", "n"], ["", "n"], [fmt(s.exp), "n"], ["", ""]].forEach(([t, c]) => tr.append(el("td", c, t))); tf.append(tr); }
+  renderCost(all, itemKey);
   entryList($("mList"), L, "shop");
+}
+function renderCost(all, itemKey){
+  const by = new Map();
+  for (const e of all){ const c = costPer(e); if (!c) continue; const k = (itemKey(e) || "ไม่ระบุ") + "|" + c.base; (by.get(k) || by.set(k, []).get(k)).push({e, ...c}); }
+  const tb = $("mCost"); tb.textContent = "";
+  if (!by.size){ const tr = el("tr"); const td = el("td", "empty", "ยังไม่มีวัตถุดิบที่ใส่ขนาด"); td.colSpan = 4; tr.append(td); tb.append(tr); return; }
+  const rows = [...by.entries()].map(([k, xs]) => { xs.sort((a, b) => a.e.date < b.e.date ? -1 : a.e.date > b.e.date ? 1 : 0); return [k.split("|")[0], xs]; }).sort((a, b) => a[0].localeCompare(b[0], "th"));
+  for (const [name, xs] of rows){
+    const last = xs[xs.length - 1], prev = xs[xs.length - 2], base = last.base;
+    const avg = xs.reduce((a, x) => a + x.e.amount, 0) / xs.reduce((a, x) => a + x.total, 0);
+    const min = Math.min(...xs.map(x => x.per));
+    const ch = prev ? (last.per - prev.per) / prev.per * 100 : 0;
+    const tr = el("tr"); tr.title = `ซื้อ ${xs.length} ครั้ง · ล่าสุด ${thaiDate(last.e.date)}`;
+    const nm = el("td", ""); nm.append(el("div", "", name), el("div", "hint", `${last.e.size} ${last.e.sizeUnit || "ml"} · ซื้อ ${xs.length} ครั้ง · ถูกสุด ${fmtC(min)}`));
+    tr.append(nm, el("td", "n", `${fmtC(last.per)}/${base}`), el("td", "n", fmtC(avg)),
+      el("td", "n" + (ch > 0.5 ? " neg" : ""), !prev ? "—" : Math.abs(ch) < 0.5 ? "=" : `${ch > 0 ? "▲" : "▼"}${Math.abs(ch).toFixed(0)}%`));
+    tb.append(tr);
+  }
 }
 
 /* ---------- funds (saving goals) ---------- */
@@ -1255,7 +1297,7 @@ function fillLists(){
 function setKind(k, fresh){
   kind = k;
   document.querySelectorAll("#kindSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === k)));
-  $("qtyRow").hidden = k !== "expense"; $("itemDiscField").hidden = k !== "expense";
+  $("qtyRow").hidden = k !== "expense"; $("itemDiscField").hidden = k !== "expense"; $("sizeField").hidden = k !== "expense";
   $("shopField").hidden = k !== "expense";
   $("savRow").hidden = k !== "saving";
   $("noteField").hidden = k === "saving";
@@ -1283,7 +1325,9 @@ onPick(pk.note, () => {
   if (last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
   if (last.unit) setPick(pk.unit, last.unit);
   if (last.shop) setPick(pk.shop, last.shop);
-  updateAmount();
+  const sz = entries.filter(e => e.kind === "expense" && e.note === n && e.size > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
+  if (sz){ $("fSize").value = sz.size; $("fSizeUnit").value = sz.sizeUnit || "ml"; }
+  updateAmount(); showSize();
 });
 onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc);
 $("fPay").addEventListener("change", () => fillAcc(""));
@@ -1312,6 +1356,13 @@ function updateAmount(){
 }
 ["fUnit", "fQty", "fItemDisc"].forEach(id => $(id).addEventListener("input", updateAmount));
 $("fItemDiscType").addEventListener("change", updateAmount);
+function showSize(){
+  const c = costPer({size: parseFloat($("fSize").value), sizeUnit: $("fSizeUnit").value, qty: parseFloat($("fQty").value), amount: parseFloat($("fAmount").value)}), h = $("sizeHint");
+  h.hidden = !c;
+  if (c) h.textContent = `รวม ${(+c.total.toFixed(2)).toLocaleString("th-TH")} ${c.base} · ตก ${c.base} ละ ${fmtC(c.per)} บาท`;
+}
+["fSize", "fQty", "fUnit", "fAmount", "fItemDisc"].forEach(id => $(id).addEventListener("input", showSize));
+["fSizeUnit", "fItemDiscType"].forEach(id => $(id).addEventListener("change", showSize));
 $("fAmount").addEventListener("input", () => {
   const a = parseFloat($("fAmount").value) + (editing?.disc || 0), q = parseFloat($("fQty").value);
   const v = parseFloat($("fItemDisc").value) || 0, pct = $("fItemDiscType").value === "pct";
@@ -1349,13 +1400,13 @@ function openForm(e){
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
   $("entryForm").reset();
-  itemGross = 0; $("itemDiscHint").hidden = true;
+  itemGross = 0; $("itemDiscHint").hidden = true; $("sizeHint").hidden = true;
   setKind(k, true);
   if (e){
     setPick(pk.biz, bizOf(e)); fillNames(e.name || ""); fillNotes(e.note || "");
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
-    $("fItemDisc").value = e.itemDisc || ""; itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
+    $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
     setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || "");
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
@@ -1407,6 +1458,7 @@ $("entryForm").addEventListener("submit", async ev => {
     const un = pickVal(pk.unit), sh = pickVal(pk.shop);
     if (un && q > 0) base.unit = un; if (sh) base.shop = sh;
     const idc = itemDiscNow(); if (idc > 0) base.itemDisc = idc;
+    const sz = parseFloat($("fSize").value); if (sz > 0){ base.size = sz; base.sizeUnit = $("fSizeUnit").value; }
   }
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
@@ -1442,7 +1494,7 @@ $("entryForm").addEventListener("submit", async ev => {
     toast(out.length > 1 ? `บันทึกผ่อน ${out.length} งวดแล้ว` : `บันทึก${KIND_LABEL[kind]} ${fmt(amount)} บาทแล้ว เพิ่มรายการต่อได้เลย`);
     // keep date, owner, category for the next item from the same bill
     const keepName = name, keepBiz = pickVal(pk.biz), keepShop = pickVal(pk.shop), keepPay = $("fPay").value, keepAcc = pickVal(pk.acc);
-    ["fAmount","fUnit","fQty","fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true;
+    ["fAmount","fUnit","fQty","fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true;
     setPick(pk.biz, keepBiz); fillNames(keepName); fillNotes(""); setPick(pk.shop, keepShop); $("fPay").value = keepPay; fillAcc(keepAcc);
     $("fAmount").focus();
   } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
@@ -1487,13 +1539,14 @@ function itemFromForm(){
   const u = parseFloat($("fUnit").value), q = parseFloat($("fQty").value), un = pickVal(pk.unit);
   if (u > 0) it.unitPrice = u; if (q > 0) it.qty = q; if (un && q > 0) it.unit = un;
   const idc = itemDiscNow(); if (idc > 0) it.itemDisc = idc;
+  const sz = parseFloat($("fSize").value); if (sz > 0){ it.size = sz; it.sizeUnit = $("fSizeUnit").value; }
   return it;
 }
 $("billAdd").addEventListener("click", () => {
   const it = itemFromForm();
   if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
   bill.push(it);
-  ["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true;
+  ["fAmount", "fUnit", "fQty", "fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true;
   fillNotes(""); setPick(pk.unit, "");
   toast(`เพิ่ม ${it.note || it.name} ลงบิลแล้ว ใส่ชิ้นต่อไปได้เลย`);
   showBillUI(); $("fAmount").focus();
@@ -1527,7 +1580,7 @@ $("billSave").addEventListener("click", async () => {
   try {
     await store.save(out);
     toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
-    bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty", "fItemDisc"].forEach(id => $(id).value = ""); itemGross = 0; $("itemDiscHint").hidden = true; fillNotes("");
+    bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty", "fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true; fillNotes("");
     showBillUI();
   } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
   finally { $("billSave").disabled = false; }
@@ -1552,7 +1605,7 @@ $("billSave").addEventListener("click", async () => {
 })();
 
 /* ---------- CSV export / restore ---------- */
-const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"],["itemDisc","ส่วนลดรายการ"]];
+const CSV_COLS = [["date","วันที่"],["kindTh","ประเภท"],["name","ชื่อรายการ"],["amount","จำนวนเงิน"],["note","รายละเอียดอื่นๆ"],["unitPrice","ราคาต่อชิ้น"],["qty","จำนวนชิ้น"],["side","ซื้อ/ขาย"],["group","กลุ่ม"],["ym","Year-Month"],["biz","ร้าน/กิจการ"],["unit","หน่วย"],["shop","ซื้อจากร้าน"],["pay","วิธีจ่าย"],["account","บัญชี/ช่องทาง"],["inst","งวด"],["instId","รหัสผ่อน"],["who","ใครออม"],["billId","รหัสบิล"],["disc","ส่วนลด"],["itemDisc","ส่วนลดรายการ"],["size","ขนาดบรรจุ"],["sizeUnit","หน่วยขนาด"]];
 const KIND_TH = {income: "รายรับ", expense: "ค่าใช้จ่าย", saving: "ออม+ลงทุน"};
 $("exportBtn").addEventListener("click", () => {
   const esc = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
@@ -1602,8 +1655,8 @@ $("restoreFile").addEventListener("change", async ev => {
     const k = KIND_BY_TH[get(r, "kindTh")], d = parseDate(get(r, "date")), a = parseAmt(get(r, "amount"));
     if (!k || !d || !isFinite(a)) return null;
     const e = {kind: k, date: d, ym: ymOf(d), name: get(r, "name"), amount: a, updatedAt: new Date().toISOString()};
-    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId"]){ const v = get(r, key); if (v) e[key] = v; }
-    for (const key of ["unitPrice","qty","disc","itemDisc"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
+    for (const key of ["note","side","group","biz","unit","shop","pay","account","inst","instId","who","billId","sizeUnit"]){ const v = get(r, key); if (v) e[key] = v; }
+    for (const key of ["unitPrice","qty","disc","itemDisc","size"]){ const v = parseAmt(get(r, key)); if (v > 0) e[key] = v; }
     if (k === "saving" && e.side !== "ขาย") e.side = "ซื้อ";
     if (e.biz === PERSONAL) delete e.biz;
     return e;
