@@ -1114,8 +1114,17 @@ function renderIncome(P){
 // Days crossed off before the list existed count as all ticked.
 // The app list is editable in ตั้งค่า. A finished day is stored as "*" so adding an app later keeps it finished.
 const FIRST_SRC = ["Make by KBank", "TikTok", "Shopee", "Lazada", "SCB", "Next", "ไทยช่วยไทย"];
-let CHECK_SRC = [...FIRST_SRC, "7-11"];
-const loadSrcs = () => { CHECK_SRC = Array.isArray(settings.checkApps) && settings.checkApps.length ? settings.checkApps : [...FIRST_SRC, "7-11"]; };
+const DEF_SRC = [...FIRST_SRC, "7-11", "ออมสิน"];
+let CHECK_SRC = [...DEF_SRC];
+const loadSrcs = () => { CHECK_SRC = Array.isArray(settings.checkApps) && settings.checkApps.length ? settings.checkApps : [...DEF_SRC]; };
+// apps added to the default list later also join a list already edited in ตั้งค่า (once each)
+setTimeout(() => {
+  const own = settings.checkApps, done = settings.checkAppsAdded || [];
+  const add = ["ออมสิน"].filter(a => !done.includes(a));
+  if (!add.length) return;
+  if (Array.isArray(own) && own.length) store.setSetting("checkApps", [...own, ...add.filter(a => !own.includes(a))]);
+  store.setSetting("checkAppsAdded", [...done, ...add]);
+}, 0);
 const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
 const srcKey = kind => kind === "income" ? "checkSrcInc" : "checkSrc";
 function srcsOf(iso, kind){
