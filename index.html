@@ -1905,6 +1905,11 @@ function showBillUI(){
   const can = kind === "expense" && !editing && $("fPay").value !== "ผ่อนจ่าย";
   $("billAdd").hidden = !can;
   $("billBox").hidden = !can || !bill.length;
+  // with a bill open the add button sits inside the bill box, next to ล้างบิล
+  const ba = $("billAdd"), inBox = can && bill.length > 0;
+  if (inBox && ba.previousElementSibling !== $("billClear")) $("billClear").after(ba);
+  else if (!inBox && ba.previousElementSibling !== $("saveBtn")) $("saveBtn").after(ba);
+  ba.textContent = inBox ? "＋ เพิ่มลงบิล" : "＋ เพิ่มลงบิล (ซื้อหลายอย่าง)";
   if (!bill.length) return;
   const box = $("billItems"); box.textContent = "";
   bill.forEach((it, i) => {
