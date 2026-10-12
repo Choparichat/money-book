@@ -233,6 +233,13 @@ dialog form{display:grid;gap:10px;padding:16px;overflow:auto}
 .dhead{display:flex;justify-content:space-between;align-items:center}
 .x{border:0;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--muted);width:36px;height:36px}
 .snap{display:grid;gap:6px;background:var(--sunk);border-radius:8px;padding:8px 10px}
+.snapitems{display:grid;gap:6px;background:var(--surface);border-radius:8px;padding:8px 10px}
+.snapitems .row{display:grid;grid-template-columns:minmax(0,1fr) 88px auto;gap:6px;align-items:center}
+.snapitems .row input{min-width:0;padding:6px 8px;font-size:.9rem}
+.snapitems .row input.p{text-align:right;font-variant-numeric:tabular-nums}
+.snapitems .row .cat{grid-column:1 / -1;font-size:.72rem;color:var(--muted);margin:-4px 0 4px 2px}
+.snapitems .row button{border:0;background:transparent;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:0 4px}
+.snapitems .warn{color:var(--exp);font-size:.82rem}
 .ocrtext{white-space:pre-wrap;font-size:.75rem;max-height:140px;overflow:auto;background:var(--surface);border-radius:6px;padding:6px 8px;margin:6px 0 0}
 details summary{cursor:pointer;font-weight:500}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -459,7 +466,13 @@ details summary{cursor:pointer;font-weight:500}
       </div>
       <div class="hint" id="snapHint"></div>
       <div class="toast" id="snapMsg" role="status"></div>
-      <details id="snapTextWrap" hidden><summary class="hint">ข้อความที่อ่านได้จากรูป</summary><pre class="ocrtext" id="snapText"></pre></details>
+      <div id="snapItemsBox" class="snapitems" hidden>
+        <div class="bill-head"><strong>สินค้าที่อ่านได้</strong><span class="hint">แก้ชื่อหรือราคาได้ กด × เพื่อตัดทิ้ง</span></div>
+        <div id="snapItems"></div>
+        <div class="bill-sum" id="snapSum"></div>
+        <div class="actions"><button class="btn primary" type="button" id="snapToBill">เพิ่มทั้งหมดลงบิล</button></div>
+      </div>
+      <details id="snapTextWrap" hidden><summary class="hint">ข้อความดิบ</summary><pre class="ocrtext" id="snapText"></pre></details>
     </div>
     <div class="hint" id="sheetNote" hidden></div>
     <div class="two">
@@ -2037,14 +2050,19 @@ function snapMsg(msg, bad){ $("snapMsg").textContent = msg; $("snapMsg").style.c
 async function onSnapFile(ev){
   const f = ev.target.files[0]; ev.target.value = "";
   if (!f || !readReceipt) return;
-  $("snapTextWrap").hidden = true;
+  $("snapTextWrap").hidden = true; $("snapItemsBox").hidden = true;
   document.querySelectorAll(".snap label").forEach(l => l.style.pointerEvents = "none");
   snapMsg("กำลังอ่านรูป…");
   try {
     const r = await readReceipt(f, snapMsg);
-    if (r.text){ $("snapText").textContent = r.text; $("snapTextWrap").hidden = false; }
+    if (r.text){ $("snapText").textContent = r.text; $("snapTextWrap").hidden = false; $("snapTextWrap").open = false; }
     const d = parseDate(r.date || ""), amt = parseAmt(r.amount);
     if (d) $("fDate").value = d;
+    if (r.items && r.items.length && kind === "expense" && !editing){
+      showSnapItems(r.items, isFinite(amt) ? amt : 0, r.disc || 0);
+      snapMsg(`อ่านได้ ${r.items.length} รายการ${d ? " และวันที่" : ""} ตรวจชื่อกับราคา แล้วกด "เพิ่มทั้งหมดลงบิล"`);
+      return;
+    }
     if (isFinite(amt) && amt > 0){ $("fAmount").value = amt.toFixed(2); $("fUnit").value = ""; $("fQty").value = ""; updateInstHint(); }
     const found = [d && "วันที่", isFinite(amt) && amt > 0 && "จำนวนเงิน"].filter(Boolean);
     snapMsg(found.length ? `กรอก${found.join(" ")}ให้แล้ว เลือกหมวดกับรายละเอียด ตรวจแล้วกดบันทึก` : "ไม่พบตัวเลขที่ชัดเจนในรูป กรอกเองได้เลย", !found.length);
@@ -2054,6 +2072,67 @@ async function onSnapFile(ev){
     document.querySelectorAll(".snap label").forEach(l => l.style.pointerEvents = "");
   }
 }
+// Items read from the receipt, editable before they go into the bill.
+let snapRows = [], snapTotal = 0, snapDisc = 0;
+const looseKey = s => String(s || "").toLowerCase().replace(/[^a-z0-9ก-๙]/g, "");
+// The closest detail already used, so category and wording follow what was typed before.
+function matchPast(name){
+  const k = looseKey(name); if (k.length < 2) return null;
+  let best = null, score = 0;
+  for (const e of entries){
+    if (e.kind !== "expense" || !e.note) continue;
+    const n = looseKey(e.note); if (!n) continue;
+    let s = n === k ? 1 : (n.includes(k) || k.includes(n)) ? Math.min(n.length, k.length) / Math.max(n.length, k.length) : 0;
+    if (!s){ const a = new Set(k.match(/.{2}/g) || []), b = n.match(/.{2}/g) || []; s = b.filter(x => a.has(x)).length / Math.max(a.size, b.length, 1) * 0.9; }
+    if (s > score || (s === score && best && e.date > best.date)){ score = s; best = e; }
+  }
+  return score >= 0.55 ? best : null;
+}
+function showSnapItems(items, total, disc){
+  snapRows = items.map(it => { const m = matchPast(it.name); return {name: m ? m.note : it.name, price: it.price, cat: m ? m.name : "", biz: m ? bizOf(m) : ""}; });
+  snapTotal = total; snapDisc = disc;
+  drawSnapItems();
+  $("snapItemsBox").hidden = false;
+}
+function drawSnapItems(){
+  const box = $("snapItems"); box.textContent = "";
+  snapRows.forEach((r, i) => {
+    const row = el("div", "row");
+    const n = document.createElement("input"); n.value = r.name; n.setAttribute("aria-label", "ชื่อสินค้า"); n.addEventListener("input", () => { r.name = n.value; });
+    const p = document.createElement("input"); p.className = "p"; p.type = "number"; p.step = "0.01"; p.inputMode = "decimal"; p.value = r.price.toFixed(2); p.setAttribute("aria-label", "ราคา");
+    p.addEventListener("input", () => { r.price = parseFloat(p.value) || 0; snapSum(); });
+    const x = el("button", "", "×"); x.type = "button"; x.setAttribute("aria-label", "ตัดรายการนี้ทิ้ง"); x.addEventListener("click", () => { snapRows.splice(i, 1); drawSnapItems(); });
+    row.append(n, p, x);
+    row.append(el("div", "cat", r.cat ? `หมวด ${r.cat} (เคยบันทึกไว้)` : "หมวด: ใช้ตามช่องหมวดด้านล่าง"));
+    box.append(row);
+  });
+  snapSum();
+}
+function snapSum(){
+  const sm = $("snapSum"); sm.textContent = "";
+  const sum = Math.round(snapRows.reduce((a, r) => a + (r.price || 0), 0) * 100) / 100;
+  const line = (a, b, c) => { const d = el("div", c || ""); d.append(el("span", "", a), el("span", "num", b)); sm.append(d); };
+  line(`รวม ${snapRows.length} รายการ`, fmt(sum));
+  if (snapDisc) line("ส่วนลด", "−" + fmt(snapDisc));
+  if (snapTotal) line("Total ในใบเสร็จ", fmt(snapTotal), "net");
+  const net = Math.round((sum - snapDisc) * 100) / 100;
+  if (snapTotal && Math.abs(net - snapTotal) > 0.009) sm.append(el("div", "warn", `ยอดรายการรวม ${fmt(net)} ไม่ตรงกับ Total ${fmt(snapTotal)} (ต่างกัน ${fmt(Math.abs(net - snapTotal))}) ลองดูว่าอ่านราคาไหนผิดหรือขาดรายการไหน`));
+}
+$("snapToBill").addEventListener("click", () => {
+  const formCat = pickVal(pk.name), rows = snapRows.filter(r => r.name.trim() && r.price > 0);
+  if (!rows.length){ toast("ไม่มีรายการให้เพิ่ม", true); return; }
+  if (rows.some(r => !r.cat) && !formCat){ toast("เลือกหมวดในช่องหมวดก่อน (ใช้กับรายการที่ยังไม่มีหมวด)", true); $("fNameQ")?.focus(); return; }
+  for (const r of rows){
+    const it = {name: r.cat || formCat, amount: Math.round(r.price * 100) / 100, biz: r.biz || curBiz(), note: r.name.trim()};
+    bill.push(it);
+  }
+  if (snapDisc && !$("billDisc").value){ $("billDisc").value = snapDisc; $("billDiscType").value = "baht"; }
+  ["fAmount", "fUnit", "fQty", "fItemDisc", "fSize"].forEach(id => $(id).value = ""); fillNotes("");
+  $("snapItemsBox").hidden = true; snapRows = [];
+  showBillUI();
+  snapMsg(`เพิ่ม ${rows.length} รายการลงบิลแล้ว แตะชื่อในบิลเพื่อแก้หมวดหรือรายละเอียด แล้วกด "บันทึกทั้งบิล"`);
+  $("billBox").scrollIntoView({block: "nearest"});
+});
 $("snapCam").addEventListener("change", onSnapFile);
 $("snapPick").addEventListener("change", onSnapFile);
 
@@ -2148,7 +2227,33 @@ function parseReceiptText(text){
     m = l.match(/(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*(\d{2,4})/i);
     if (m){ const mo = "janfebmaraprmayjunjulaugsepoctnovdec".indexOf(m[2].slice(0,3).toLowerCase()) / 3 + 1; if (date = ok(fixY(m[3]), mo, +m[1])) break; }
   }
-  return {kind: "expense", date, amount: isFinite(amount) ? amount : "", text};
+  const {items, disc} = parseReceiptItems(lines);
+  return {kind: "expense", date, amount: isFinite(amount) ? amount : "", text, items, disc};
+}
+// Item lines end with a price like 45.00; totals, tax, payment and change lines are skipped.
+function parseReceiptItems(lines){
+  const skip = /total|รวม|ยอด|สุทธิ|vat|ภาษี|tax|เงินสด|cash|ทอน|change|ชำระ|บัตร|card|credit|เครดิต|qr|promptpay|พร้อมเพย์|โอน|ปัดเศษ|round|รายการ|items?\b|qty|จำนวนชิ้น|ใบเสร็จ|receipt|tel|โทร|เลขที่|pos|member|สมาชิก|แต้ม|point/i;
+  const discRe = /ส่วนลด|discount|ลด\b/i;
+  const items = []; let disc = 0;
+  for (const raw of lines){
+    const l = raw.replace(/[|¦]/g, " ").replace(/\s+/g, " ").trim();
+    const m = l.match(/^(.*?)\s*(-?\d{1,3}(?:,\d{3})*\.\d{2}|-?\d+\.\d{2})\s*[A-Za-z*#]{0,2}\s*$/);
+    if (!m) continue;
+    const price = Math.abs(parseFloat(m[2].replace(/,/g, "")));
+    if (!(price > 0)) continue;
+    if (discRe.test(m[1]) || m[2].startsWith("-")){ disc += price; continue; }
+    const head = m[1].replace(/^[^A-Za-zก-๙]+/, "");
+    if (skip.test(head) && (head.length < 10 || new RegExp("^(?:" + skip.source + ")", "i").test(head))) continue;
+    let name = m[1]
+      .replace(/^[\s\/\\\-_.:;,'"`~!@#$%^&*()\[\]{}<>=+]+/, "")       // junk the camera reads before the text
+      .replace(/^(?:\d+\s+){1,2}/, "")                                  // line or quantity numbers at the start
+      .replace(/^[\/\\\-_.:;,'"`~|]+\s*/, "")
+      .replace(/\s+[@xX×]\s*[\d.,]+\s*$/, "")                          // "@ 15.00" unit price at the end
+      .replace(/[\s\-_.:;,|]+$/, "").trim();
+    if ((name.match(/[A-Za-zก-๙]/g) || []).length < 2) continue;
+    items.push({name, price});
+  }
+  return {items, disc: Math.round(disc * 100) / 100};
 }
 async function initReceiptReader(){
   readReceipt = async (file, progress) => {
@@ -2178,7 +2283,7 @@ async function initReceiptReader(){
       throw {userMessage: navigator.onLine === false ? "ครั้งแรกต้องต่ออินเทอร์เน็ตเพื่อโหลดตัวอ่าน" : "อ่านรูปไม่สำเร็จ ลองถ่ายใหม่ให้เห็นตัวเลขชัดๆ"};
     }
   };
-  $("snapHint").textContent = "ระบบจะอ่านวันที่และยอดเงินให้ (อ่านในเครื่อง ไม่ส่งรูปไปไหน) ส่วนชื่อรายการเลือกเอง ถ่ายให้ได้ผลดี: วางใบเสร็จบนพื้นสีเข้ม ถ่ายตรงๆ ให้ใบเสร็จเกือบเต็มจอ แสงสว่างไม่มีเงา และไม่เบลอ";
+  $("snapHint").textContent = "ระบบจะอ่านวันที่ รายการสินค้า ราคา และ Total ให้ (อ่านในเครื่อง ไม่ส่งรูปไปไหน) ถ่ายให้ได้ผลดี: วางใบเสร็จบนพื้นสีเข้ม ถ่ายตรงๆ ให้ใบเสร็จเกือบเต็มจอ แสงสว่างไม่มีเงา และไม่เบลอ";
   $("snapBox").hidden = false;
 }
 /* RECEIPT-READER-END */
