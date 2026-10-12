@@ -637,7 +637,7 @@ function rememberSizes(list){
     const k = (e.note || "").trim(), z = Number(e.size);
     if (!k || !(z > 0)) continue;
     const u = e.sizeUnit || "ml";
-    if (!m[k] || m[k].size !== z || m[k].unit !== u){ m[k] = {size: z, unit: u}; changed = true; }
+    if (!m[k] || m[k].size !== z || m[k].unit !== u){ m[k] = {size: z, unit: u, t: Date.now()}; changed = true; }
   }
   if (changed) store.setSetting("itemSizes", m);
 }
@@ -1049,7 +1049,7 @@ function renderSizeAlert(){
     const inp = document.createElement("input"); inp.type = "number"; inp.min = "0"; inp.step = "any"; inp.inputMode = "decimal"; inp.placeholder = "เช่น 100"; inp.setAttribute("aria-label", "ขนาดของ " + v.note);
     const sel = document.createElement("select"); ["g", "ml", "kg", "l", "ชิ้น", "ฟอง"].forEach(u => sel.append(opt(u, u))); sel.setAttribute("aria-label", "หน่วย");
     const ok = el("button", "btn sm primary", "บันทึก"); ok.type = "button";
-    ok.addEventListener("click", () => { const z = parseFloat(inp.value); if (!(z > 0)){ inp.focus(); return; } store.setSetting("itemSizes", {...(settings.itemSizes || {}), [v.note]: {size: z, unit: sel.value}}); });
+    ok.addEventListener("click", () => { const z = parseFloat(inp.value); if (!(z > 0)){ inp.focus(); return; } store.setSetting("itemSizes", {...(settings.itemSizes || {}), [v.note]: {size: z, unit: sel.value, t: Date.now()}}); });
     const no = el("button", "btn sm", "ไม่ต้องใส่"); no.type = "button"; no.title = "ของที่ไม่ต้องคิดต่อกรัม เช่น ค่าส่ง";
     no.addEventListener("click", () => store.setSetting("sizeSkip", [...new Set([...(settings.sizeSkip || []), v.note])]));
     const f = el("div", "sa-f"); f.append(inp, sel, ok, no);
@@ -2258,15 +2258,31 @@ function initStore(){
     f.groups = [...new Set([f.group, ...gs])];
     ls.set(SET, settings); enqueue({op: "setting", key: "funds", value: settings.funds});
   };
-  const writeSettings = (s, local) => { settings = s; ls.set(SET, s); if (!local) render(); };
-  // Settings this device changed but the sheet has not stored yet win over the sheet's copy.
+  // Ingredient sizes are only ever added, never taken away by a sync: every size this device has seen is also kept
+  // in its own backup, and sheet and device copies are merged item by item (the newest wins), so an older copy
+  // written from another device or an older app can never wipe sizes typed here.
+  const SIZES = "money-book-sizes-keep";
+  const mergeSizes = (...maps) => { const o = {}; for (const m of maps) for (const [k, v] of Object.entries(m || {})) if (v && v.size > 0 && (!o[k] || (v.t || 0) >= (o[k].t || 0))) o[k] = v; return o; };
+  const writeSettings = (s, local) => {
+    if (s.itemSizes) ls.set(SIZES, mergeSizes(ls.get(SIZES, {}), s.itemSizes));
+    settings = s; ls.set(SET, s); if (!local) render();
+  };
+  { const b = ls.get(SIZES, null); if (b) settings.itemSizes = mergeSizes(b, settings.itemSizes); }
+  // Settings this device changed but the sheet has not stored yet win over the sheet's copy,
+  // and so do settings changed while a read from the sheet was on its way (its copy is older).
   const pendingSettings = () => ls.get(Q, []).filter(o => o.op === "setting").map(o => o.key);
-  const mergeSettings = remote => {
+  const wrote = {};
+  const mergeSettings = (remote, since) => {
     if (!remote) return;
     const keep = pendingSettings(), s = {...remote};
     keep.forEach(k => { s[k] = settings[k]; });
+    if (since) for (const k in wrote) if (wrote[k] >= since) s[k] = settings[k];
     // A sheet that has never stored goals yet keeps this device's goals.
     for (const k of Object.keys(settings)) if (!(k in s)) { s[k] = settings[k]; if (cfg) enqueue({op: "setting", key: k, value: settings[k]}); }
+    const sizes = mergeSizes(remote.itemSizes, ls.get(SIZES, {}), settings.itemSizes, s.itemSizes);
+    const skip = [...new Set([...(remote.sizeSkip || []), ...(settings.sizeSkip || [])])];
+    if (Object.keys(sizes).length){ s.itemSizes = sizes; if (cfg && JSON.stringify(sizes) !== JSON.stringify(remote.itemSizes || {})) enqueue({op: "setting", key: "itemSizes", value: sizes}); }
+    if (skip.length){ s.sizeSkip = skip; if (cfg && skip.length !== (remote.sizeSkip || []).length) enqueue({op: "setting", key: "sizeSkip", value: skip}); }
     writeSettings(s, true);
   };
   let cfg = ls.get(CFG, null);
@@ -2327,7 +2343,8 @@ function initStore(){
     if (!cfg) return;
     await flush();
     if (ls.get(Q, []).length || busy) return;
-    try { const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings); write(j.entries); idle(); }
+    const since = Date.now();
+    try { const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings, since); write(j.entries); idle(); }
     catch (err){ status(`โหลดจาก Google Sheet ไม่ได้: ${err.message} (ใช้ข้อมูลในเครื่องไปก่อน)`, true); }
   }
 
@@ -2350,7 +2367,7 @@ function initStore(){
     subscribe(fn){ subs.push(fn); fn(read()); },
     async save(list){ const l = read(); const had = new Set(l.map(x => x.id)); logOps(e => had.has(e.id) ? "edit" : "add", list); for (const e of list){ const i = l.findIndex(x => x.id === e.id); if (i >= 0) l[i] = e; else l.push(e); } write(l); enqueue(...list.map(e => ({op:"put", entry:e}))); },
     async remove(ids){ const s = new Set(ids); logOps("del", read().filter(e => s.has(e.id))); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
-    setSetting(key, value){ writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
+    setSetting(key, value){ wrote[key] = Date.now(); writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
     status(){ idle(); },
     // Change or clear a row the user typed in a year tab of the sheet.
     async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
