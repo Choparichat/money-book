@@ -208,7 +208,16 @@ label.check input{width:auto;margin:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 input,select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
-.pick{display:grid;gap:6px}
+.pick{display:grid;gap:6px;position:relative}
+.sr-sel{position:absolute!important;left:0;top:0;width:1px!important;height:1px!important;opacity:0;pointer-events:none}
+.combo{position:relative}
+.combo .ci{width:100%;padding-right:34px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 13px) 55%;background-size:5px 5px;background-repeat:no-repeat}
+.combo .cl{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);max-height:260px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:4px}
+.combo .opt{padding:9px 10px;border-radius:7px;cursor:pointer;font-size:.95rem}
+.combo .opt.act,.combo .opt:hover{background:var(--sunk)}
+.combo .opt.cur{font-weight:600}
+.combo .opt.add{color:var(--accent);font-weight:600}
+.combo .none{padding:9px 10px;color:var(--muted);font-size:.9rem}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:500}
 .btn.sm{padding:4px 10px;font-size:.85rem}
@@ -1296,7 +1305,8 @@ function setPick(p, v){
     if (v && ![...p.sel.options].some(o => o.value === v)) p.sel.insertBefore(opt(v, (p.label || String)(v)), p.sel.lastElementChild);
     p.sel.value = v;
   }
-  p.inp.hidden = true; p.inp.value = "";
+  p.inp.hidden = true; p.inp.value = ""; p.viaCombo = false;
+  syncCombo(p);
 }
 function fillPick(p, groups, keep){
   const typing = keep === undefined && p.sel.value === NEW, typed = p.inp.value;
@@ -1312,7 +1322,7 @@ function fillPick(p, groups, keep){
     if (g.label) p.sel.append(parent);
   }
   p.sel.append(opt(NEW, p.newText));
-  if (typing){ p.sel.value = NEW; p.inp.hidden = false; p.inp.value = typed; return; }
+  if (typing){ p.sel.value = NEW; p.inp.hidden = !!p.viaCombo; p.inp.value = typed; syncCombo(p); return; }
   setPick(p, cur);
 }
 function freq(list, key){
@@ -1326,10 +1336,83 @@ function groupList(){ return withAll(freq(entries.filter(e => e.kind === "saving
 function onPick(p, fn){
   p.sel.addEventListener("change", () => {
     const isNew = p.sel.value === NEW;
-    p.inp.hidden = !isNew; if (isNew){ p.inp.value = ""; p.inp.focus(); }
+    if (isNew && p.pending != null){ p.inp.value = p.pending; p.inp.hidden = true; p.viaCombo = true; p.pending = null; }
+    else { p.viaCombo = false; p.inp.hidden = !isNew; if (isNew){ p.inp.value = ""; p.inp.focus(); } }
+    syncCombo(p);
     fn && fn();
   });
 }
+
+/* ---------- type-to-search pickers ---------- */
+// The <select> stays the source of truth; a text box on top filters its options as you type.
+const norm = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+function syncCombo(p){
+  if (!p.ci) return;
+  const v = p.sel.value;
+  if (v === NEW) p.ci.value = p.inp.value;
+  else { const o = p.sel.selectedOptions[0]; p.ci.value = v ? (o ? o.textContent : v) : ""; }
+}
+function makeCombo(p, placeholder){
+  const wrap = el("div", "combo"), ci = document.createElement("input"), list = el("div", "cl");
+  ci.type = "text"; ci.className = "ci"; ci.autocomplete = "off"; ci.setAttribute("role", "combobox"); ci.setAttribute("aria-expanded", "false");
+  ci.placeholder = placeholder;   list.setAttribute("role", "listbox"); list.hidden = true;
+  wrap.append(ci, list); p.sel.before(wrap); p.sel.classList.add("sr-sel"); p.sel.tabIndex = -1; p.sel.setAttribute("aria-hidden", "true");
+  p.ci = ci; ci.id = p.sel.id + "Q";
+  const lab = document.querySelector(`label[for="${p.sel.id}"]`); if (lab) lab.htmlFor = ci.id;
+  let items = [], act = -1;
+  const choose = it => {
+    if (it.add){ p.pending = it.add; p.sel.value = NEW; }
+    else p.sel.value = it.v;
+    p.sel.dispatchEvent(new Event("change"));
+    close(); syncCombo(p);
+  };
+  const paint = () => [...list.children].forEach((c, i) => c.classList.toggle("act", i === act));
+  const show = all => {
+    const q = all ? "" : norm(ci.value);
+    const seen = new Set(), opts = [];
+    [...p.sel.options].forEach(o => { if (o.value === NEW || seen.has(o.value)) return; seen.add(o.value); opts.push({v: o.value, t: o.textContent}); });
+    items = opts.filter(o => !q || norm(o.t).includes(q) || norm(o.v).includes(q));
+    // matches that start with the text come first, otherwise keep the most-used order
+    if (q) items.sort((a, b) => (norm(a.t).startsWith(q) ? 0 : 1) - (norm(b.t).startsWith(q) ? 0 : 1));
+    const typed = ci.value.trim();
+    if (typed && !all && !opts.some(o => norm(o.t) === norm(typed) || norm(o.v) === norm(typed))) items.push({add: typed, t: `＋ เพิ่ม "${typed}"`});
+    list.textContent = "";
+    if (!items.length) list.append(el("div", "none", "ไม่พบ ลองพิมพ์คำอื่น"));
+    items.forEach(it => {
+      const r = el("div", "opt" + (it.add ? " add" : "") + (!it.add && it.v === p.sel.value ? " cur" : ""), it.t || p.empty || "—");
+      r.setAttribute("role", "option");
+      r.addEventListener("pointerdown", ev => { ev.preventDefault(); choose(it); });
+      list.append(r);
+    });
+    act = q && items.length ? 0 : -1; paint();
+    list.hidden = false; ci.setAttribute("aria-expanded", "true");
+  };
+  const close = () => { list.hidden = true; ci.setAttribute("aria-expanded", "false"); ci.placeholder = placeholder; };
+  // focusing clears the box so typing starts a fresh search; the current choice stays as the hint
+  const open = () => { if (ci.value) ci.placeholder = ci.value; ci.value = ""; show(true); };
+  ci.addEventListener("focus", open);
+  ci.addEventListener("click", () => { if (list.hidden) open(); });
+  ci.addEventListener("input", () => show(false));
+  ci.addEventListener("keydown", ev => {
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp"){ ev.preventDefault(); if (list.hidden) show(true); act = Math.max(0, Math.min(items.length - 1, act + (ev.key === "ArrowDown" ? 1 : -1))); paint(); list.children[act]?.scrollIntoView({block: "nearest"}); }
+    else if (ev.key === "Enter"){ if (!list.hidden && items[act]){ ev.preventDefault(); choose(items[act]); } else if (!list.hidden) ev.preventDefault(); }
+    else if (ev.key === "Escape"){ if (!list.hidden){ ev.preventDefault(); ev.stopPropagation(); close(); syncCombo(p); } }
+  });
+  ci.addEventListener("blur", () => setTimeout(() => {
+    if (list.hidden) return;
+    // leaving with new text keeps it as a new name; leaving empty clears an optional field
+    const typed = ci.value.trim(), cur = p.sel.value === NEW ? p.inp.value : (p.sel.selectedOptions[0]?.textContent || "");
+    close();
+    if (!typed || typed === cur.trim()) return syncCombo(p);
+    const hit = items.find(it => !it.add && norm(it.t) === norm(typed));
+    choose(hit || {add: typed});
+  }, 120));
+  syncCombo(p);
+}
+makeCombo(pk.note, "พิมพ์ค้นหา หรือพิมพ์รายละเอียดใหม่");
+makeCombo(pk.name, "พิมพ์ค้นหาหมวด");
+makeCombo(pk.shop, "พิมพ์ค้นหาร้าน หรือพิมพ์ชื่อร้านใหม่");
+makeCombo(pk.group, "พิมพ์ค้นหากลุ่ม");
 
 /* ---------- entry form ---------- */
 let kind = "expense", editing = null;
