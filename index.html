@@ -109,6 +109,9 @@ table.ledger td,table.ledger th{white-space:nowrap}
 table.ledger tfoot td{white-space:normal}
 table.ledger tr.year td{font-weight:600;background:var(--sunk)}
 table.ledger tr.click{cursor:pointer}
+table.ledger tr.click:hover td{background:var(--sunk)}
+.compare tbody tr{cursor:pointer}
+.compare tbody tr:hover td{background:var(--sunk)}
 table.ledger tr.future td{opacity:.6}
 .list{display:grid}
 .day{font-size:.78rem;color:var(--muted);padding:10px 2px 4px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
@@ -389,6 +392,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="toast" id="snapMsg" role="status"></div>
       <details id="snapTextWrap" hidden><summary class="hint">ข้อความที่อ่านได้จากรูป</summary><pre class="ocrtext" id="snapText"></pre></details>
     </div>
+    <div class="hint" id="sheetNote" hidden></div>
     <div class="two">
       <div class="field"><label for="fDate">วันที่</label><input id="fDate" type="date" required></div>
       <div class="field"><label for="fAmount">จำนวนเงินรวม (บาท)</label><input id="fAmount" type="number" step="0.01" inputmode="decimal" required></div>
@@ -398,12 +402,12 @@ details summary{cursor:pointer;font-weight:500}
     <div class="field" id="noteField"><label for="fNote">รายละเอียด</label><div class="pick"><select id="fNote"></select><input id="fNoteNew" hidden placeholder="พิมพ์รายละเอียดใหม่"></div></div>
     <div class="three" id="qtyRow">
       <div class="field"><label for="fQty">จำนวน</label><input id="fQty" type="number" step="any" min="0" inputmode="decimal"></div>
-      <div class="field"><label for="fUnitName">หน่วย</label><div class="pick"><select id="fUnitName"></select><input id="fUnitNameNew" hidden placeholder="หน่วย"></div></div>
+      <div class="field" id="unitField"><label for="fUnitName">หน่วย</label><div class="pick"><select id="fUnitName"></select><input id="fUnitNameNew" hidden placeholder="หน่วย"></div></div>
       <div class="field"><label for="fUnit">ราคา/หน่วย</label><input id="fUnit" type="number" step="0.01" min="0" inputmode="decimal"></div>
     </div>
     <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
     <div class="three" id="savRow" hidden>
-      <div class="field"><label for="fWho">ใครออม</label><select id="fWho"><option value="">ฉัน</option><option value="แฟน">แฟน</option></select></div>
+      <div class="field" id="whoField"><label for="fWho">ใครออม</label><select id="fWho"><option value="">ฉัน</option><option value="แฟน">แฟน</option></select></div>
       <div class="field"><label for="fSide">ซื้อ/ขาย</label><select id="fSide"><option>ซื้อ</option><option>ขาย</option></select></div>
       <div class="field"><label for="fGroup">กลุ่ม/กองทุน</label><div class="pick"><select id="fGroup"></select><input id="fGroupNew" hidden placeholder="ชื่อกลุ่มใหม่"></div></div>
     </div>
@@ -729,24 +733,26 @@ function renderSaving(P){
   $("sAllYears").setAttribute("aria-pressed", String(savAllYears));
   let src = savAllYears ? all : L;
   if (savPick?.withPartner) src = src.concat(partner.filter(e => e.kind === "saving" && (savAllYears || inPeriod(e))));
-  const rows = savPick ? src.filter(e => savPick.groups.has(groupKey(e.group))) : src;
-  $("sListTitle").textContent = savPick ? `รายการ ${savPick.label}${savAllYears ? " ทุกปี" : " " + periodLabel()}` : "รายการลงทุน/ออม";
+  const rows = savPick ? src.filter(e => savPick.groups.has(groupKey(e.group)) && (!savPick.month || e.date.startsWith(savPick.month))) : src;
+  const mLabel = savPick?.month ? ` ${TH_MONTHS[Number(savPick.month.slice(5)) - 1]} ${savPick.month.slice(0,4)}` : "";
+  $("sListTitle").textContent = savPick ? `รายการ ${savPick.label}${mLabel || (savAllYears ? " ทุกปี" : " " + periodLabel())}` : "รายการลงทุน/ออม";
   if (savPick) savingLedger($("sList"), rows); else entryList($("sList"), rows, "saving");
 }
 // Check one group (or a goal's groups): oldest first, with the running total, so a missing or
 // mistyped row is easy to spot.
 let savPick = null, savAllYears = false;
-function pickSavGroups(groups, label, fromChip, withPartner){
-  savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1 || !!withPartner, withPartner: !!withPartner} : null;
+function pickSavGroups(groups, label, fromChip, withPartner, month){
+  savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1 || !!withPartner, withPartner: !!withPartner, month} : null;
   if (groups && !fromChip) savAllYears = true;
   if (page !== "saving") go("saving"); else render();
   if (groups && !fromChip) $("sListTitle").scrollIntoView({behavior: "smooth", block: "start"});
 }
-$("sAllYears").addEventListener("click", () => { savAllYears = !savAllYears; render(); });
+$("sAllYears").addEventListener("click", () => { savAllYears = !savAllYears; if (savPick) savPick.month = null; render(); });
 function savingLedger(box, rows){
   box.textContent = "";
   rows = [...rows].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   if (!rows.length){ box.append(el("div", "empty", "ไม่มีรายการของกลุ่มนี้ในช่วงที่เลือก ลองกด \"ดูทุกปี\"")); return; }
+  box.append(el("div", "hint", "แตะแถวไหนก็ได้เพื่อแก้ไขหรือลบ"));
   const t = el("table", "ledger"), hd = el("thead"), hr = el("tr");
   const both = rows.some(e => e.who === PARTNER);
   ["วันที่", ...(both ? ["ใคร"] : []), "แอป/บัญชี", "กลุ่ม", "ซื้อ/ขาย", "จำนวน", "ยอดสะสม", "ที่มา"].forEach(x => hr.append(el("th", x === "จำนวน" || x === "ยอดสะสม" ? "n" : "", x)));
@@ -846,7 +852,9 @@ function fundCompare(f){
     const t = el("table"), hd = el("thead"), hr = el("tr");
     ["เดือน", "ฉัน", PARTNER, "ต่างกัน"].forEach((x, i) => hr.append(el("th", i ? "n" : "", x))); hd.append(hr); t.append(hd);
     const tb = el("tbody");
-    ms.forEach(([m, v]) => { const tr = el("tr"); tr.append(el("td", "", `${TH_ABBR[Number(m.slice(5)) - 1]} ${m.slice(0,4)}`), el("td", "n", fmt0(v.me)), el("td", "n", fmt0(v.pa)), el("td", "n" + (v.me - v.pa < 0 ? " neg" : ""), (v.me - v.pa > 0 ? "+" : "") + fmt0(v.me - v.pa))); tb.append(tr); });
+    ms.forEach(([m, v]) => { const tr = el("tr"); tr.tabIndex = 0; tr.title = "แตะเพื่อดูและแก้รายการของเดือนนี้";
+      const open = () => pickSavGroups(fundGroups(f), f.name, false, fundShared(f), m);
+      tr.addEventListener("click", open); tr.addEventListener("keydown", ev => { if (ev.key === "Enter") open(); }); tr.append(el("td", "", `${TH_ABBR[Number(m.slice(5)) - 1]} ${m.slice(0,4)}`), el("td", "n", fmt0(v.me)), el("td", "n", fmt0(v.pa)), el("td", "n" + (v.me - v.pa < 0 ? " neg" : ""), (v.me - v.pa > 0 ? "+" : "") + fmt0(v.me - v.pa))); tb.append(tr); });
     t.append(tb); box.append(t);
   }
   if (!pa) box.append(el("div", "hint", `ยังไม่มียอดของ${PARTNER} กด ＋ เพิ่มรายการ เลือก ลงทุน/ออม แล้วตั้ง "ใครออม" เป็น ${PARTNER}`));
@@ -1176,8 +1184,16 @@ function updateInstHint(){
   $("instHint").textContent = a ? `แบ่งเป็น ${n} งวด งวดละประมาณ ${fmt(a / n)} บาท แอปจะสร้างรายการให้ทุกเดือนตั้งแต่${(v => v ? TH_MONTHS[Number(v.slice(5,7)) - 1] + " " + v.slice(0,4) : "เดือนหน้า")($("fInstStart").value)}` : "ใส่ยอดรวมทั้งหมดที่ต้องผ่อน แอปจะแบ่งเป็นงวดให้";
 }
 
+// Rows typed in the sheet's year tabs are edited in place there; the sheet has no column
+// for the app-only details (who, payment, shop...), so those fields are hidden for them.
+function sheetMode(e){
+  const on = !!(e && e.src === "sheet");
+  ["kindSeg", "snapBox", "bizField", "shopField", "payRow", "instRow", "whoField", "unitField"].forEach(id => { if (on) $(id).hidden = true; });
+  if (!on){ ["kindSeg", "payRow", "whoField", "unitField"].forEach(id => $(id).hidden = false); if (readReceipt) $("snapBox").hidden = false; }
+  $("sheetNote").hidden = !on;
+  if (on) $("sheetNote").textContent = `รายการนี้อยู่ในชีต แท็บ ${e.tab || "ปี"} แถว ${e.row || "?"} แก้แล้วแอปจะเขียนกลับไปที่แถวเดิมในชีตให้`;
+}
 function openForm(e){
-  if (e && e.src === "sheet"){ flash("รายการนี้มาจากแท็บปีในชีต แก้ไขหรือลบได้ใน Google Sheet"); return; }
   editing = e || null;
   $("dlg").showModal();
   $("toast").textContent = ""; $("snapMsg").textContent = ""; $("snapTextWrap").hidden = true;
@@ -1202,6 +1218,7 @@ function openForm(e){
     $("fDate").value = mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO;
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
   }
+  sheetMode(e);
   updateInstHint();
 }
 $("fab").addEventListener("click", () => openForm(null));
@@ -1215,7 +1232,10 @@ function resetDelete(){ delArmed = 0; $("delBtn").textContent = "ลบราย
 $("delBtn").addEventListener("click", async () => {
   if (!editing) return;
   if (delArmed !== 1){ resetDelete(); delArmed = 1; $("delBtn").textContent = "กดอีกครั้งเพื่อยืนยันการลบ"; return; }
-  await store.remove([editing.id]); $("dlg").close();
+  try {
+    if (editing.src === "sheet") await store.sheetDel(editing); else await store.remove([editing.id]);
+    $("dlg").close();
+  } catch (err){ toast(err.message, true); resetDelete(); }
 });
 $("delAllBtn").addEventListener("click", async () => {
   if (!editing?.instId) return;
@@ -1240,6 +1260,14 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด") base.account = acc;
+  if (editing?.src === "sheet"){
+    const upd = {...editing, date, ym: ymOf(date), name, amount};
+    ["unitPrice", "qty"].forEach(k => delete upd[k]);
+    if (kind === "saving"){ upd.side = base.side; upd.group = base.group; }
+    else { upd.note = base.note || ""; if (base.unitPrice) upd.unitPrice = base.unitPrice; if (base.qty) upd.qty = base.qty; }
+    try { await store.sheetEdit(editing, upd); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    return;
+  }
   const out = [];
   if (editing){
     out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {})});
@@ -1416,10 +1444,13 @@ function initStore(){
     status("กำลังส่งขึ้น Google Sheet…");
     let ok = false;
     try {
-      await call({ops: q.map(({seq, ...op}) => op)});
+      const j = await call({ops: q.map(({seq, ...op}) => op)});
       const sent = new Set(q.map(o => o.seq));
       ls.set(Q, ls.get(Q, []).filter(o => !sent.has(o.seq)));
       ok = true;
+      if (q.some(o => o.op === "sheetEdit" || o.op === "sheetDel")) setTimeout(() => {
+        pull().then(() => { if (j.conflicts) status(`มี ${j.conflicts} รายการในชีตที่ถูกแก้ไปก่อนแล้ว แอปจึงไม่ได้เขียนทับ ลองแก้อีกครั้ง`, true); });
+      }, 0);
     } catch (err){ status(`ยังส่งขึ้น Google Sheet ไม่ได้: ${err.message}`, true); }
     finally { busy = false; }
     if (ok){ if (ls.get(Q, []).length) flush(); else idle(); }
@@ -1428,10 +1459,15 @@ function initStore(){
     if (!cfg) return;
     await flush();
     if (ls.get(Q, []).length || busy) return;
-    try { const j = await call({ops: [], list: true}); mergeSettings(j.settings); write(j.entries); idle(); }
+    try { const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings); write(j.entries); idle(); }
     catch (err){ status(`โหลดจาก Google Sheet ไม่ได้: ${err.message} (ใช้ข้อมูลในเครื่องไปก่อน)`, true); }
   }
 
+  function sheetOp(orig, op){
+    if (!cfg) throw new Error("ต้องเชื่อม Google Sheet ก่อน ถึงจะแก้รายการจากชีตได้");
+    if ((ls.get("money-book-script", 0)) < 3 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
+    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || ""}});
+  }
   store = {
     kind: "local",
     subscribe(fn){ subs.push(fn); fn(read()); },
@@ -1439,6 +1475,9 @@ function initStore(){
     async remove(ids){ const s = new Set(ids); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
     setSetting(key, value){ writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
     status(){ idle(); },
+    // Change or clear a row the user typed in a year tab of the sheet.
+    async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
+    async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); write(read().filter(x => x.id !== orig.id)); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
@@ -1455,7 +1494,7 @@ function initStore(){
     $("syncOn").disabled = true; status("กำลังเชื่อมต่อ…");
     try {
       const j = await call({ops: [], list: true}, c);
-      cfg = c; ls.set(CFG, cfg);
+      cfg = c; ls.set(CFG, cfg); ls.set("money-book-script", j.version || 0);
       ls.set(Q, []);
       mergeSettings(j.settings || {});
       // Keep what is only on this device: send entries the sheet does not have yet.
