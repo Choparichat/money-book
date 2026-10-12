@@ -102,6 +102,14 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);border-radius:999px;padding:3px 12px;background:transparent;cursor:pointer;font-size:.85rem}
 .chip[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.legend li.pickable{cursor:pointer}
+.legend li.pickable:hover .lb{text-decoration:underline}
+table.ledger{min-width:620px}
+table.ledger td,table.ledger th{white-space:nowrap}
+table.ledger tfoot td{white-space:normal}
+table.ledger tr.year td{font-weight:600;background:var(--sunk)}
+table.ledger tr.click{cursor:pointer}
+table.ledger tr.future td{opacity:.6}
 .list{display:grid}
 .day{font-size:.78rem;color:var(--muted);padding:10px 2px 4px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
 .item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 4px;border-bottom:1px solid var(--line);cursor:pointer}
@@ -284,7 +292,12 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>แยกตามกลุ่ม/กองทุน</h2><div id="sPie"></div></div>
       <div class="panel"><h2>แยกตามแอป/บัญชี</h2><div id="sPieApp"></div></div>
     </div>
-    <div class="panel"><h2>รายการลงทุน/ออม</h2><div class="list" id="sList"></div></div>
+    <div class="panel">
+      <div class="panel-head"><h2 id="sListTitle">รายการลงทุน/ออม</h2><button class="chip" type="button" id="sAllYears" aria-pressed="false">ดูทุกปี</button></div>
+      <div class="hint">แตะชื่อกลุ่มด้านล่าง หรือในกราฟ เพื่อดูเฉพาะกลุ่มนั้นพร้อมยอดสะสม</div>
+      <div class="chips" id="sChips" style="margin:8px 0"></div>
+      <div class="list" id="sList"></div>
+    </div>
   </section>
 
   <!-- SHOP (Muan) -->
@@ -503,7 +516,7 @@ function colorFor(mapKey, list, key, label){
 }
 
 /* ---------- donut ---------- */
-function donut(box, rows, mapKey, allList, key, centerTitle){
+function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
   box.textContent = "";
   rows = rows.filter(r => r[1] > 0);
   const total = rows.reduce((a, r) => a + r[1], 0);
@@ -555,6 +568,7 @@ function donut(box, rows, mapKey, allList, key, centerTitle){
     li.append(dot, el("span", "lb", s.label), el("span", "num", fmt0(s.v)), el("span", "pc num", (s.v/total*100).toFixed(0) + "%"));
     li.title = s.label;
     li.addEventListener("mouseenter", () => hl(i)); li.addEventListener("mouseleave", () => hl(null));
+    if (onPick && s.c !== "var(--sother)"){ li.classList.add("pickable"); li.tabIndex = 0; li.addEventListener("click", () => onPick(s.label)); li.addEventListener("keydown", ev => { if (ev.key === "Enter") onPick(s.label); }); }
     legend.append(li);
   });
   setCenter(null);
@@ -689,10 +703,59 @@ function renderSaving(P){
   const L = P.filter(e => e.kind === "saving"), all = entries.filter(e => e.kind === "saving");
   const s = sums(L);
   setNum("sBuy", s.buy); setNum("sSell", s.sell); setNum("sNet", s.sav, true);
-  donut($("sPie"), totalsBy(L, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน");
+  donut($("sPie"), totalsBy(L, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g));
   donut($("sPieApp"), totalsBy(L, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน");
   renderFunds($("sFunds"), false);
-  entryList($("sList"), L, "saving");
+  // chips: every group, so one can be checked across all years
+  const box = $("sChips"); box.textContent = "";
+  const groups = totalsBy(savAllYears ? all : L, e => groupKey(e.group), signedSaving);
+  [[null, "ทั้งหมด"], ...groups.map(([g]) => [g, g])].forEach(([g, t]) => {
+    const c = el("button", "chip", t); c.type = "button";
+    c.setAttribute("aria-pressed", String(g === null ? !savPick : !!savPick && savPick.label === g));
+    c.addEventListener("click", () => pickSavGroups(g === null ? null : [g], g, true));
+    box.append(c);
+  });
+  if (savPick && !groups.some(([g]) => g === savPick.label) && !savPick.fund){ const c = el("button", "chip", savPick.label); c.type = "button"; c.setAttribute("aria-pressed", "true"); box.append(c); }
+  $("sAllYears").setAttribute("aria-pressed", String(savAllYears));
+  const src = savAllYears ? all : L;
+  const rows = savPick ? src.filter(e => savPick.groups.has(groupKey(e.group))) : src;
+  $("sListTitle").textContent = savPick ? `รายการ ${savPick.label}${savAllYears ? " ทุกปี" : " " + periodLabel()}` : "รายการลงทุน/ออม";
+  if (savPick) savingLedger($("sList"), rows); else entryList($("sList"), rows, "saving");
+}
+// Check one group (or a goal's groups): oldest first, with the running total, so a missing or
+// mistyped row is easy to spot.
+let savPick = null, savAllYears = false;
+function pickSavGroups(groups, label, fromChip){
+  savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1} : null;
+  if (groups && !fromChip) savAllYears = true;
+  if (page !== "saving") go("saving"); else render();
+  if (groups && !fromChip) $("sListTitle").scrollIntoView({behavior: "smooth", block: "start"});
+}
+$("sAllYears").addEventListener("click", () => { savAllYears = !savAllYears; render(); });
+function savingLedger(box, rows){
+  box.textContent = "";
+  rows = [...rows].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  if (!rows.length){ box.append(el("div", "empty", "ไม่มีรายการของกลุ่มนี้ในช่วงที่เลือก ลองกด \"ดูทุกปี\"")); return; }
+  const t = el("table", "ledger"), hd = el("thead"), hr = el("tr");
+  ["วันที่", "แอป/บัญชี", "กลุ่ม", "ซื้อ/ขาย", "จำนวน", "ยอดสะสม", "ที่มา"].forEach((x, i) => hr.append(el("th", i === 4 || i === 5 ? "n" : "", x)));
+  hd.append(hr); t.append(hd);
+  const tb = el("tbody"); let run = 0, lastY = "";
+  const yearTotals = new Map();
+  for (const e of rows){
+    const y = e.date.slice(0, 4);
+    if (y !== lastY){ lastY = y; const yr = el("tr", "year"); const td = el("td", "", "ปี " + y); td.colSpan = 7; yr.append(td); tb.append(yr); }
+    const v = signedSaving(e); run += v; yearTotals.set(y, (yearTotals.get(y) || 0) + v);
+    const tr = el("tr", "click" + (e.date > todayISO ? " future" : ""));
+    tr.append(el("td", "", thaiDate(e.date)), el("td", "", e.name || "—"), el("td", "", groupKey(e.group) || "—"), el("td", e.side === "ขาย" ? "neg" : "", e.side || "ซื้อ"),
+      el("td", "n" + (v < 0 ? " neg" : ""), (v < 0 ? "−" : "") + fmt(Math.abs(v))), el("td", "n", fmt(run)), el("td", "muted", e.src === "sheet" ? (e.tab ? `ชีต แท็บ ${e.tab}` : "ชีต") : "แอป"));
+    tr.addEventListener("click", () => openForm(e));
+    tb.append(tr);
+  }
+  t.append(tb);
+  const tf = el("tfoot"), fr = el("tr");
+  const c1 = el("td", "", `รวม ${rows.length} รายการ · ` + [...yearTotals].map(([y, v]) => `ปี ${y}: ${fmt0(v)}`).join(", ")); c1.colSpan = 5;
+  fr.append(c1, el("td", "n", fmt(run)), el("td")); tf.append(fr); t.append(tf);
+  const sc = el("div", "scroll"); sc.append(t); box.append(sc);
 }
 
 function shopList(){ return bizList().filter(b => b !== PERSONAL); }
@@ -769,8 +832,11 @@ function renderFunds(box, compact){
     } else if (target) info.push("ถึงเป้าแล้ว 🎉");
     d.append(h, m, el("div", "hint", info.join(" · ")));
     if (!compact){
-      const b = el("button", "btn sm", "แก้ไข"); b.type = "button"; b.style.justifySelf = "start";
-      b.addEventListener("click", () => openFund(f)); d.append(b);
+      const b = el("button", "btn sm", "แก้ไข"); b.type = "button";
+      b.addEventListener("click", () => openFund(f));
+      const v = el("button", "btn sm", "ดูรายการ"); v.type = "button";
+      v.addEventListener("click", () => pickSavGroups(fundGroups(f), f.name));
+      const row = el("div", "actions"); row.append(v, b); d.append(row);
     }
     box.append(d);
   }
