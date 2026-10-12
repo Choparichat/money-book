@@ -1432,7 +1432,10 @@ function makeCombo(p, placeholder){
   p.ci = ci; ci.id = p.sel.id + "Q";
   const lab = document.querySelector(`label[for="${p.sel.id}"]`); if (lab) lab.htmlFor = ci.id;
   let items = [], act = -1;
+  let adding = false;
   const choose = it => {
+    // "＋ เพิ่ม…" with nothing typed yet: empty the box and wait for the new name
+    if (it.start){ adding = true; ci.value = ""; ci.placeholder = "พิมพ์ชื่อใหม่ แล้วกด Enter หรือแตะ ＋ เพิ่ม"; show(false); return; }
     // picking what is already chosen changes nothing (and must not reset the fields below it)
     if (!it.add && it.v === p.sel.value){ close(); syncCombo(p); return; }
     if (it.add && p.sel.value === NEW && p.inp.value === it.add){ close(); syncCombo(p); return; }
@@ -1450,11 +1453,16 @@ function makeCombo(p, placeholder){
     // matches that start with the text come first, otherwise keep the most-used order
     if (q) items.sort((a, b) => (norm(a.t).startsWith(q) ? 0 : 1) - (norm(b.t).startsWith(q) ? 0 : 1));
     const typed = ci.value.trim();
-    if (typed && !all && !opts.some(o => norm(o.t) === norm(typed) || norm(o.v) === norm(typed))) items.push({add: typed, t: `＋ เพิ่ม "${typed}"`});
+    if (typed && !all && !opts.some(o => norm(o.t) === norm(typed) || norm(o.v) === norm(typed))) (adding ? items.unshift.bind(items) : items.push.bind(items))({add: typed, t: `＋ เพิ่ม "${typed}"`});
+    if (adding && !typed) items = [];
+    // always offer a way to add, even before anything is typed
+    if (!typed) items.push({start: true, t: p.newText});
     list.textContent = "";
-    if (!items.length) list.append(el("div", "none", "ไม่พบ ลองพิมพ์คำอื่น"));
+    if (adding && !typed) list.append(el("div", "none", "พิมพ์ชื่อใหม่ในช่องด้านบน"));
+    else if (!items.length) list.append(el("div", "none", "ไม่พบ ลองพิมพ์คำอื่น"));
     items.forEach(it => {
-      const r = el("div", "opt" + (it.add ? " add" : "") + (!it.add && it.v === p.sel.value ? " cur" : ""), it.t || p.empty || "—");
+      if (it.start && adding) return;
+      const r = el("div", "opt" + (it.add || it.start ? " add" : "") + (!it.add && it.v === p.sel.value ? " cur" : ""), it.t || p.empty || "—");
       r.setAttribute("role", "option");
       r.addEventListener("pointerdown", ev => { ev.preventDefault(); choose(it); });
       list.append(r);
@@ -1462,7 +1470,7 @@ function makeCombo(p, placeholder){
     act = q && items.length ? 0 : -1; paint();
     list.hidden = false; ci.setAttribute("aria-expanded", "true");
   };
-  const close = () => { list.hidden = true; ci.setAttribute("aria-expanded", "false"); ci.placeholder = placeholder; };
+  const close = () => { adding = false; list.hidden = true; ci.setAttribute("aria-expanded", "false"); ci.placeholder = placeholder; };
   // focusing clears the box so typing starts a fresh search; the current choice stays as the hint
   const open = () => { if (ci.value) ci.placeholder = ci.value; ci.value = ""; show(true); };
   ci.addEventListener("focus", open);
@@ -1485,9 +1493,9 @@ function makeCombo(p, placeholder){
   syncCombo(p);
 }
 makeCombo(pk.note, "พิมพ์ค้นหา หรือพิมพ์รายละเอียดใหม่");
-makeCombo(pk.name, "พิมพ์ค้นหาหมวด");
+makeCombo(pk.name, "พิมพ์ค้นหา หรือพิมพ์ชื่อหมวดใหม่");
 makeCombo(pk.shop, "พิมพ์ค้นหาร้าน หรือพิมพ์ชื่อร้านใหม่");
-makeCombo(pk.group, "พิมพ์ค้นหากลุ่ม");
+makeCombo(pk.group, "พิมพ์ค้นหา หรือพิมพ์ชื่อกลุ่มใหม่");
 makeCombo(pk.biz, "พิมพ์ค้นหา หรือพิมพ์ชื่อร้าน/กิจการใหม่");
 
 /* ---------- entry form ---------- */
