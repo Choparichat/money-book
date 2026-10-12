@@ -141,6 +141,8 @@ table.ledger tr.future td{opacity:.6}
 .bill{display:grid;gap:8px;background:var(--sunk);border-radius:8px;padding:10px 12px}
 .bill-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .bill .li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;font-size:.9rem;padding:4px 0;border-bottom:1px solid var(--line)}
+.bill .li .tap{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.billrow.tap{cursor:pointer}.billrow .edit{white-space:nowrap;font-weight:400;color:var(--muted);font-size:.78rem;margin-left:6px}
 .bill .li button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0 4px}
 .bill-sum{display:grid;gap:2px;font-size:.9rem}
 .bill-sum div{display:flex;justify-content:space-between}
@@ -470,7 +472,7 @@ details summary{cursor:pointer;font-weight:500}
     </div>
     <div class="hint" id="instHint" hidden></div>
     <div class="bill" id="billBox" hidden>
-      <div class="bill-head"><strong>บิลนี้</strong><span class="hint" id="billInfo"></span></div>
+      <div class="bill-head"><strong id="billTitle">บิลนี้</strong><span class="hint" id="billInfo"></span></div>
       <div id="billItems"></div>
       <div class="two">
         <div class="field"><label for="billDisc">ส่วนลดทั้งบิล</label><input id="billDisc" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"></div>
@@ -689,7 +691,11 @@ function entryList(box, list, key){
       const items = rows.filter(x => x.billId === e.billId);
       const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0), net = items.reduce((a, x) => a + (Number(x.amount) || 0), 0);
       const hd = el("div", "billrow");
-      hd.append(el("span", "", `🧾 บิล${e.shop ? " " + e.shop : ""} · ${items.length} รายการ${disc ? ` · ลด ${fmt(disc)}` : ""}`), el("span", "num", "รวม " + fmt(net)));
+      const ht = el("span", "", `🧾 บิล${e.shop ? " " + e.shop : ""} · ${items.length} รายการ${disc ? ` · ลด ${fmt(disc)}` : ""}`); ht.append(el("span", "edit", "✎ แก้"));
+      hd.append(ht, el("span", "num", "รวม " + fmt(net)));
+      hd.classList.add("tap"); hd.tabIndex = 0; hd.setAttribute("role", "button"); hd.title = "แตะเพื่อแก้ทั้งบิล";
+      const bid = e.billId;
+      hd.addEventListener("click", () => openBill(bid)); hd.addEventListener("keydown", ev => { if (ev.key === "Enter") openBill(bid); });
       box.append(hd);
       items.forEach(x => box.append(entryItem(x, true)));
       continue;
@@ -1423,7 +1429,7 @@ function openForm(e){
 }
 $("fab").addEventListener("click", () => openForm(null));
 $("dlgClose").addEventListener("click", () => $("dlg").close());
-$("dlg").addEventListener("close", () => { editing = null; });
+$("dlg").addEventListener("close", () => { editing = null; if (billEdit){ billEdit = null; bill = []; $("billDisc").value = ""; } $("billTitle").textContent = "บิลนี้"; });
 
 function flash(msg){ $("storeNote").textContent = msg; $("storeNote").style.color = "var(--exp)"; clearTimeout(flash.t); flash.t = setTimeout(() => { $("storeNote").style.color = ""; store?.status?.(); }, 3500); }
 function toast(msg, bad){ const t = $("toast"); t.textContent = msg; t.style.color = bad ? "var(--exp)" : "var(--muted)"; }
@@ -1511,7 +1517,11 @@ function showBillUI(){
   const box = $("billItems"); box.textContent = "";
   bill.forEach((it, i) => {
     const li = el("div", "li");
-    li.append(el("span", "", `${it.note || it.name}${it.qty ? ` · ${it.qty}${it.unit ? " " + it.unit : ""}${it.unitPrice ? " × " + fmt(it.unitPrice) : ""}` : ""}${it.itemDisc ? ` · ลด ${fmt(it.itemDisc)}` : ""}`), el("span", "num", fmt(it.amount)));
+    const t = el("span", "tap", `${it.note || it.name}${it.qty ? ` · ${it.qty}${it.unit ? " " + it.unit : ""}${it.unitPrice ? " × " + fmt(it.unitPrice) : ""}` : ""}${it.itemDisc ? ` · ลด ${fmt(it.itemDisc)}` : ""}`);
+    t.tabIndex = 0; t.setAttribute("role", "button"); t.title = "แตะเพื่อแก้รายการนี้";
+    const edit = () => { const cur = itemFromForm(); bill.splice(i, 1); if (cur) bill.push(cur); itemToForm(it); showBillUI(); toast(`กำลังแก้ ${it.note || it.name} แก้เสร็จกด ＋ เพิ่มลงบิล${cur ? " (รายการที่กรอกค้างไว้ย้ายลงบิลแล้ว)" : ""}`); };
+    t.addEventListener("click", edit); t.addEventListener("keydown", ev => { if (ev.key === "Enter") edit(); });
+    li.append(t, el("span", "num", fmt(it.amount)));
     const x = el("button", "", "×"); x.type = "button"; x.setAttribute("aria-label", "เอาออกจากบิล");
     x.addEventListener("click", () => { bill.splice(i, 1); showBillUI(); });
     li.append(x); box.append(li);
@@ -1542,6 +1552,36 @@ function itemFromForm(){
   const sz = parseFloat($("fSize").value); if (sz > 0){ it.size = sz; it.sizeUnit = $("fSizeUnit").value; }
   return it;
 }
+// Put one bill item back into the form so it can be changed.
+function itemToForm(it){
+  setPick(pk.biz, it.biz || PERSONAL); fillNames(it.name || ""); fillNotes(it.note || "");
+  $("fUnit").value = it.unitPrice || ""; $("fQty").value = it.qty || ""; setPick(pk.unit, it.unit || "");
+  $("fItemDisc").value = it.itemDisc || ""; $("fItemDiscType").value = "baht";
+  $("fSize").value = it.size || ""; $("fSizeUnit").value = it.sizeUnit || "ml";
+  $("fAmount").value = it.amount; itemGross = Math.round((it.amount + (it.itemDisc || 0)) * 100) / 100;
+  showItemDisc(); showSize(); $("fAmount").focus();
+}
+// A saved bill opens as a draft again; saving replaces its items.
+let billEdit = null;
+function openBill(billId){
+  const items = entries.filter(x => x.billId === billId).sort((a, b) => (a.id < b.id ? -1 : 1));
+  if (!items.length) return;
+  const f = items[0];
+  openForm(null);
+  setKind("expense", true);
+  billEdit = {billId, ids: items.map(x => x.id)};
+  $("formTitle").textContent = "แก้ไขบิล"; $("billTitle").textContent = "บิลที่แก้ไข";
+  $("fDate").value = f.date;
+  setPick(pk.biz, bizOf(f)); fillNames(""); fillNotes("");
+  setPick(pk.shop, f.shop || ""); fillPays(f.pay || ""); if (f.pay) $("fPay").value = f.pay; fillAcc(f.account || "");
+  const keep = ["name", "biz", "note", "unitPrice", "qty", "unit", "itemDisc", "size", "sizeUnit"];
+  bill = items.map(x => { const it = {}; keep.forEach(k => { if (x[k] !== undefined && x[k] !== "") it[k] = x[k]; }); it.amount = Math.round(((Number(x.amount) || 0) + (Number(x.disc) || 0)) * 100) / 100; return it; });
+  const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0);
+  $("billDisc").value = disc ? Math.round(disc * 100) / 100 : ""; $("billDiscType").value = "baht";
+  ["fAmount", "fUnit", "fQty", "fItemDisc", "fSize"].forEach(id => $(id).value = "");
+  showBillUI();
+  $("billBox").scrollIntoView({block: "nearest"});
+}
 $("billAdd").addEventListener("click", () => {
   const it = itemFromForm();
   if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
@@ -1563,7 +1603,7 @@ $("billSave").addEventListener("click", async () => {
   const date = $("fDate").value;
   if (!date || !bill.length){ toast("ใส่วันที่และสินค้าอย่างน้อย 1 ชิ้น", true); return; }
   const {gross, disc} = billTotals();
-  const billId = "b" + Date.now().toString(36);
+  const billId = billEdit ? billEdit.billId : "b" + Date.now().toString(36), oldIds = billEdit ? [...billEdit.ids] : [];
   const shared = {kind: "expense", date, ym: ymOf(date), pay: $("fPay").value, billId, updatedAt: new Date().toISOString()};
   const sh = pickVal(pk.shop); if (sh) shared.shop = sh;
   const acc = pickVal(pk.acc); if (acc && shared.pay !== "เงินสด") shared.account = acc;
@@ -1572,13 +1612,15 @@ $("billSave").addEventListener("click", async () => {
   const out = bill.map((it, i) => {
     const share = i === bill.length - 1 ? Math.round(left * 100) / 100 : Math.round(disc * it.amount / gross * 100) / 100;
     left -= share;
-    const e = {...shared, ...it, id: store.newId(), amount: Math.round((it.amount - share) * 100) / 100};
+    const e = {...shared, ...it, id: oldIds.shift() || store.newId(), amount: Math.round((it.amount - share) * 100) / 100};
     if (share > 0) e.disc = share;
     return e;
   });
   $("billSave").disabled = true;
   try {
     await store.save(out);
+    if (oldIds.length) await store.remove(oldIds);
+    if (billEdit){ bill = []; billEdit = null; $("dlg").close(); return; }
     toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
     bill = []; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty", "fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true; fillNotes("");
     showBillUI();
