@@ -138,6 +138,13 @@ table.ledger tr.future td{opacity:.6}
 .billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
 .billrow .num{white-space:nowrap}
 .item.inbill{padding-left:16px}
+.item.hascat{box-shadow:inset 3px 0 0 var(--cat);padding-left:10px}.item.inbill.hascat{padding-left:16px}
+.tag.cat{background:color-mix(in srgb,var(--cat) 18%,var(--sunk));color:var(--fg)}
+.tag.cat::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cat);margin-right:4px;vertical-align:1px}
+.cc{display:grid;gap:2px}.cc-h{font-weight:600;font-size:.85rem;margin-top:8px}
+.cc-row{display:flex;align-items:center;gap:10px;padding:3px 0;font-size:.9rem}
+.cc-row input[type=color]{width:34px;height:28px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer}
+.cc-row .btn.sm{margin-left:auto;padding:2px 10px;font-size:.78rem;min-height:0}
 .bill{display:grid;gap:8px;background:var(--sunk);border-radius:8px;padding:10px 12px}
 .bill-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .bill .li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;font-size:.9rem;padding:4px 0;border-bottom:1px solid var(--line)}
@@ -409,6 +416,11 @@ details summary{cursor:pointer;font-weight:500}
       <div class="toast" id="syncMsg" role="status"></div>
     </div>
     <div class="panel">
+      <h2>สีของหมวด</h2>
+      <p class="hint" style="margin:0">แตะวงสีเพื่อเปลี่ยน สีนี้ใช้ทั้งแถบหน้ารายการและกราฟวงกลม ถ้าเชื่อมชีตไว้ สีจะซิงก์ไปทุกเครื่อง</p>
+      <div id="catColors" class="cc"></div>
+    </div>
+    <div class="panel">
       <h2>สำรองข้อมูล</h2>
       <div class="actions"><button class="btn" type="button" id="exportBtn">ส่งออก CSV ทั้งหมด</button><label class="btn" for="restoreFile">กู้คืนจากไฟล์ CSV</label><input id="restoreFile" type="file" accept=".csv,text/csv" hidden></div>
       <div class="actions"><button class="btn danger" type="button" id="restoreGo" hidden></button><span class="hint" id="restoreMsg"></span></div>
@@ -599,8 +611,23 @@ function totalsBy(list, key, val = e => Number(e.amount)||0){
 // Colour follows the thing, not its rank this month: slots go to the biggest all-time.
 const colorMaps = {};
 function colorFor(mapKey, list, key, label){
+  if (mapKey === "expCat" || mapKey === "incCat") return catColor(mapKey === "expCat" ? "expense" : "income", label);
   if (!colorMaps[mapKey]) colorMaps[mapKey] = new Map((key ? totalsBy(list, key).slice(0,8) : []).map(([k], i) => [k, `var(--s${i+1})`]));
   return colorMaps[mapKey].get(label);
+}
+
+// Category colours: the user's own pick (synced in settings), else the slot of the 8 biggest all-time.
+function catColor(kind, name){
+  const own = (settings.catColors || {})[name];
+  if (own) return own;
+  const k = "cat-" + kind;
+  if (!colorMaps[k]) colorMaps[k] = new Map(totalsBy(entries.filter(e => e.kind === kind), e => e.name).slice(0, 8).map(([n], i) => [n, `var(--s${i+1})`]));
+  return colorMaps[k].get(name);
+}
+function cssHex(c){
+  if (!c) return "#a3aaa5";
+  if (c[0] === "#") return c;
+  return getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1)).trim() || "#a3aaa5";
 }
 
 /* ---------- donut ---------- */
@@ -715,7 +742,9 @@ function entryItem(e, inBill){
     it.append(el("div", "t", title));
     const s = el("div", "s");
     const tags = [];
-    if (e.kind !== "saving" && e.note) tags.push(e.name);
+    const cc = e.kind !== "saving" && e.name ? catColor(e.kind, e.name) : null;
+    if (cc){ it.classList.add("hascat"); it.style.setProperty("--cat", cc); }
+    if (e.kind !== "saving" && e.note) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
@@ -726,7 +755,7 @@ function entryItem(e, inBill){
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
-    tags.filter(Boolean).forEach(t => s.append(el("span", "tag", t)));
+    tags.filter(Boolean).forEach(t => s.append(t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     it.addEventListener("click", () => openForm(e));
@@ -750,8 +779,27 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => {}})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: renderCatColors})[page](P);
   fillLists();
+}
+function renderCatColors(){
+  const box = $("catColors"); if (!box) return;
+  box.textContent = "";
+  const own = settings.catColors || {};
+  for (const [kind, label] of [["expense", "รายจ่าย"], ["income", "รายรับ"]]){
+    const names = totalsBy(entries.filter(e => e.kind === kind), e => e.name).map(([n]) => n).filter(Boolean);
+    DEF.cats[kind].forEach(n => { if (!names.includes(n)) names.push(n); });
+    box.append(el("div", "cc-h", label));
+    for (const n of names){
+      const row = el("div", "cc-row");
+      const inp = document.createElement("input"); inp.type = "color"; inp.value = cssHex(catColor(kind, n)); inp.setAttribute("aria-label", "สีของ " + n);
+      inp.addEventListener("change", () => store.setSetting("catColors", {...(settings.catColors || {}), [n]: inp.value}));
+      row.append(inp, el("span", "", n));
+      if (own[n]){ const r = el("button", "btn sm", "ใช้สีเดิม"); r.type = "button"; r.addEventListener("click", () => { const c = {...(settings.catColors || {})}; delete c[n]; store.setSetting("catColors", c); }); row.append(r); }
+      else if (!catColor(kind, n)) row.append(el("span", "hint", "ยังไม่มีสี"));
+      box.append(row);
+    }
+  }
 }
 function setNum(id, v, neg){ $(id).textContent = fmt(v); $(id).classList.toggle("neg", !!neg && v < 0); }
 
