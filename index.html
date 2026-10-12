@@ -114,7 +114,25 @@ table.ledger tr.click:hover td{background:var(--sunk)}
 .compare tbody tr:hover td{background:var(--sunk)}
 table.ledger tr.future td{opacity:.6}
 .list{display:grid}
-.day{font-size:.78rem;color:var(--muted);padding:10px 2px 4px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.day{position:sticky;top:var(--top-h,0px);z-index:2;background:var(--surface);font-size:.95rem;font-weight:700;color:var(--fg);padding:12px 4px 6px;border-bottom:2px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:6px}
+.day .wd{display:inline-block;min-width:2.4em;margin-right:4px;padding:1px 6px;border-radius:6px;background:var(--sunk);font-size:.8rem;text-align:center}
+.day .sum{font-size:.85rem;font-weight:600;color:var(--muted)}
+.day .sum b{color:var(--fg)}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal .wh{font-size:.72rem;color:var(--muted);text-align:center;padding:2px 0}
+.cal button{position:relative;display:grid;align-content:start;gap:1px;min-height:54px;padding:4px 3px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer;overflow:hidden}
+.cal button .d{font-size:.8rem;font-weight:600}
+.cal button .x{font-size:.7rem;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal button .heat{position:absolute;inset:0;background:var(--exp);pointer-events:none}
+.cal button > span:not(.heat){position:relative}
+.cal button .inc{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--inc)}
+.cal button.today{outline:2px solid var(--fg);outline-offset:-2px}
+.cal button.sel{border-color:var(--fg);box-shadow:inset 0 0 0 2px var(--fg)}
+.cal button.blank{visibility:hidden}
+.cal-foot{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:8px;font-size:.78rem;color:var(--muted)}
+.cal-foot .k{display:inline-flex;align-items:center;gap:4px}
+.cal-foot .dot{width:7px;height:7px;border-radius:50%;background:var(--inc);display:inline-block}
+.cal-foot .ramp{width:60px;height:8px;border-radius:4px;background:linear-gradient(90deg,transparent,var(--exp));opacity:.5;border:1px solid var(--line)}
 .item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .item:hover{background:var(--sunk)}
 .billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
@@ -237,6 +255,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="tile bal"><span class="k">คงเหลือ (รับ − จ่าย)</span><span class="v num" id="oBal">0</span></div>
       <div class="tile sav"><span class="k">ออม + ลงทุนสุทธิ</span><span class="v num" id="oSav">0</span></div>
     </div>
+    <div class="panel"><div class="panel-head"><h2 id="oCalTitle">ปฏิทินเดือนนี้</h2><span class="hint">แตะวันที่เพื่อดูรายจ่ายของวันนั้น</span></div><div id="oCal"></div></div>
     <div class="grid2">
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="oPieExp"></div></div>
       <div class="panel"><h2>เงินที่ได้รับไปอยู่ไหน</h2><div id="oPieFlow"></div></div>
@@ -281,6 +300,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="ePie"></div></div>
       <div class="panel"><h2>จ่ายด้วยอะไร</h2><div id="ePiePay"></div></div>
     </div>
+    <div class="panel"><div class="panel-head"><h2 id="eCalTitle">ปฏิทินรายจ่าย</h2><span class="hint">แตะวันที่เพื่อดูรายการของวันนั้น</span></div><div id="eCal"></div></div>
     <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
   </section>
 
@@ -489,6 +509,8 @@ const ymOf = d => d.slice(0,7);
 const now = new Date();
 const todayISO = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
+const TH_WD = ["อา.","จ.","อ.","พ.","พฤ.","ศ.","ส."];
+const weekday = iso => TH_WD[new Date(+iso.slice(0,4), +iso.slice(5,7) - 1, +iso.slice(8,10)).getDay()];
 const thaiDate = iso => { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; };
 const addMonths = (ym, n) => { let [y,m] = ym.split("-").map(Number); m += n; while (m < 1){ m += 12; y--; } while (m > 12){ m -= 12; y++; } return `${y}-${pad(m)}`; };
 const signedSaving = e => (e.side === "ขาย" ? -1 : 1) * (Number(e.amount)||0);
@@ -514,8 +536,9 @@ document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click"
   document.querySelectorAll("[data-mode]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   render();
 }));
-$("prevP").addEventListener("click", () => { curYM = addMonths(curYM, mode === "month" ? -1 : -12); render(); });
-$("nextP").addEventListener("click", () => { curYM = addMonths(curYM, mode === "month" ? 1 : 12); render(); });
+let dayPick = "";
+$("prevP").addEventListener("click", () => { dayPick = ""; curYM = addMonths(curYM, mode === "month" ? -1 : -12); render(); });
+$("nextP").addEventListener("click", () => { dayPick = ""; curYM = addMonths(curYM, mode === "month" ? 1 : 12); render(); });
 
 /* ---------- pages ---------- */
 function go(p){
@@ -629,7 +652,10 @@ function entryList(box, list, key){
     if (e.date !== day){
       day = e.date;
       const dayTotal = rows.filter(x => x.date === day).reduce((a, x) => a + (x.kind === "saving" ? signedSaving(x) : Number(x.amount)||0), 0);
-      const d = el("div", "day"); d.append(el("span", "", thaiDate(day)), el("span", "num", fmt(dayTotal))); box.append(d);
+      const d = el("div", "day");
+      const l = el("span"); l.append(el("span", "wd", weekday(day)), document.createTextNode(thaiDate(day)));
+      const r = el("span", "sum"); r.append(document.createTextNode("รวมวันนี้ "), el("b", "num", fmt(dayTotal)));
+      d.append(l, r); box.append(d);
     }
     if (e.billId){
       // one shopping trip: a header with the bill total, then each item
@@ -696,6 +722,8 @@ function render(){
 function setNum(id, v, neg){ $(id).textContent = fmt(v); $(id).classList.toggle("neg", !!neg && v < 0); }
 
 function renderOverall(P){
+  const cy = calYM(); $("oCalTitle").textContent = `ปฏิทิน ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
+  calendar($("oCal"), cy, pickDay);
   const s = sums(P);
   setNum("oInc", s.inc); setNum("oExp", s.exp); setNum("oBal", s.inc - s.exp, true); setNum("oSav", s.sav);
   const allExp = entries.filter(e => e.kind === "expense");
@@ -740,6 +768,55 @@ function renderIncome(P){
   entryList($("iList"), L.filter(e => !listFilter.income || (e.name || "ไม่ระบุหมวด") === listFilter.income), "income");
 }
 
+// Month at a glance: each day's spending, shaded by how much, with a dot on days with income.
+function calendar(box, ym, onPick){
+  box.textContent = "";
+  const [y, m] = ym.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate(), first = new Date(y, m - 1, 1).getDay();
+  const exp = new Map(), inc = new Map();
+  entries.forEach(e => {
+    if (!e.date || e.date.slice(0,7) !== ym) return;
+    const d = +e.date.slice(8,10), a = Number(e.amount) || 0;
+    if (e.kind === "expense") exp.set(d, (exp.get(d) || 0) + a);
+    else if (e.kind === "income") inc.set(d, (inc.get(d) || 0) + a);
+  });
+  const max = Math.max(0, ...exp.values());
+  const g = el("div", "cal");
+  TH_WD.forEach(w => g.append(el("div", "wh", w)));
+  for (let i = 0; i < first; i++){ const b = el("button", "blank"); b.type = "button"; b.tabIndex = -1; g.append(b); }
+  for (let d = 1; d <= days; d++){
+    const iso = `${ym}-${pad(d)}`, v = exp.get(d) || 0;
+    const b = el("button", (iso === todayISO ? "today " : "") + (iso === dayPick ? "sel" : "")); b.type = "button";
+    if (v > 0){ const h = el("span", "heat"); h.style.opacity = (0.1 + 0.45 * v / max).toFixed(2); b.append(h); }
+    b.append(el("span", "d", String(d)), el("span", "x", v ? fmt0(v) : ""));
+    if (inc.get(d)) b.append(el("span", "inc"));
+    b.setAttribute("aria-label", `${thaiDate(iso)} รายจ่าย ${fmt(v)} บาท${inc.get(d) ? ` รายรับ ${fmt(inc.get(d))} บาท` : ""}`);
+    b.title = `${weekday(iso)} ${thaiDate(iso)}\nรายจ่าย ${fmt(v)} บาท${inc.get(d) ? `\nรายรับ ${fmt(inc.get(d))} บาท` : ""}`;
+    b.addEventListener("click", () => onPick(iso));
+    g.append(b);
+  }
+  box.append(g);
+  const foot = el("div", "cal-foot");
+  const k1 = el("span", "k"); k1.append(el("span", "ramp"), document.createTextNode("สีเข้ม = ใช้เงินมาก"));
+  const k2 = el("span", "k"); k2.append(el("span", "dot"), document.createTextNode("มีรายรับ"));
+  const tot = [...exp.values()].reduce((a, b) => a + b, 0), n = exp.size;
+  foot.append(k1, k2, el("span", "", `ใช้จ่าย ${n} วัน · เฉลี่ยวันละ ${fmt0(n ? tot / days : 0)} บาท`));
+  if (dayPick && dayPick.startsWith(ym)){
+    const c = el("button", "chip", `เฉพาะ ${weekday(dayPick)} ${thaiDate(dayPick)} ✕`); c.type = "button"; c.setAttribute("aria-pressed", "true");
+    c.addEventListener("click", () => { dayPick = ""; render(); });
+    foot.append(c);
+  }
+  box.append(foot);
+}
+const calYM = () => mode === "month" ? curYM : (curYM.slice(0,4) === todayISO.slice(0,4) ? todayISO.slice(0,7) : curYM);
+function pickDay(iso){
+  dayPick = dayPick === iso ? "" : iso;
+  if (dayPick && mode !== "month"){ mode = "month"; document.querySelectorAll("[data-mode]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.mode === "month"))); }
+  if (dayPick) curYM = iso.slice(0,7);
+  if (page !== "expense") go("expense"); else render();
+  if (dayPick) $("eList").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
 function renderExpense(P){
   const L = P.filter(e => e.kind === "expense"), all = entries.filter(e => e.kind === "expense");
   const tot = sums(L).exp;
@@ -751,7 +828,9 @@ function renderExpense(P){
   const payKey = e => e.pay ? (e.pay === "เงินสด" ? "เงินสด" : (e.account || e.pay)) : "ไม่ระบุ";
   donut($("ePiePay"), totalsBy(L, payKey), "expPay", all, payKey, "จ่ายด้วย");
   chips($("eChips"), byCat, "expense");
-  entryList($("eList"), L.filter(e => !listFilter.expense || (e.name || "ไม่ระบุหมวด") === listFilter.expense), "expense");
+  const cy = calYM(); $("eCalTitle").textContent = `ปฏิทินรายจ่าย ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
+  calendar($("eCal"), cy, pickDay);
+  entryList($("eList"), L.filter(e => (!listFilter.expense || (e.name || "ไม่ระบุหมวด") === listFilter.expense) && (!dayPick || e.date === dayPick)), "expense");
 }
 
 function renderSaving(P){
@@ -1822,6 +1901,8 @@ async function initReceiptReader(){
 /* RECEIPT-READER-END */
 
 /* ---------- start ---------- */
+const setTopH = () => document.documentElement.style.setProperty("--top-h", document.querySelector(".top").offsetHeight + "px");
+setTopH(); window.addEventListener("resize", setTopH);
 try { const p = localStorage.getItem("money-book-page"); if (p && $("page-" + p)) page = p; } catch {}
 initStore();
 initReceiptReader();
