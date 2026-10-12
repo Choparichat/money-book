@@ -139,7 +139,7 @@ table.ledger tr.future td{opacity:.6}
 .cal button .d{font-size:.8rem;font-weight:600}
 .cal button .x{font-size:.7rem;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal button .heat{position:absolute;inset:0;background:var(--exp);pointer-events:none}
-.cal button > span:not(.heat):not(.cross):not(.inc){position:relative}
+.cal button > span:not(.heat):not(.cross):not(.inc):not(.part){position:relative}
 .cal button .inc{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--inc)}
 .cal button.today{outline:2px solid var(--fg);outline-offset:-2px}
 .cal button.sel{border-color:var(--fg);box-shadow:inset 0 0 0 2px var(--fg)}
@@ -148,6 +148,8 @@ table.ledger tr.future td{opacity:.6}
 .cal button.chk{border-color:var(--accent)}
 .cal button{-webkit-touch-callout:none;user-select:none}
 .cal-foot .xk{color:var(--accent);font-weight:700}
+.cal button .part{position:absolute;right:4px;bottom:3px;font-size:.62rem;font-weight:600;color:var(--accent)}
+.srcchk{flex-basis:100%;display:grid;gap:6px}
 .chip.chk-btn.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
 .cal-foot{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:8px;font-size:.78rem;color:var(--muted)}
 .cal-foot .k{display:inline-flex;align-items:center;gap:4px}
@@ -364,6 +366,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="ePie"></div></div>
       <div class="panel"><h2>จ่ายด้วยอะไร</h2><div id="ePiePay"></div></div>
     </div>
+    <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (เราจ่าย 40% · รัฐออกให้ 60%)</h2><p class="hint" style="margin:0" id="tctSum"></p></div>
     <div class="panel"><div class="panel-head"><h2 id="eCalTitle">ปฏิทินรายจ่าย</h2><span class="hint">แตะวันที่เพื่อดูรายการของวันนั้น</span></div><div id="eCal"></div></div>
     <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
   </section>
@@ -514,7 +517,7 @@ details summary{cursor:pointer;font-weight:500}
     <div class="hint" id="sheetNote" hidden></div>
     <div class="two">
       <div class="field"><label for="fDateText">วันที่ (วัน/เดือน/ปี)</label><div class="datebox"><input id="fDateText" placeholder="วว/ดด/ปปปป" inputmode="numeric" maxlength="10" autocomplete="off"><button type="button" class="btn sm" id="fDatePick" aria-label="เลือกวันที่จากปฏิทิน">📅</button><input id="fDate" type="date" tabindex="-1" aria-hidden="true" class="vh"></div></div>
-      <div class="field"><label for="fAmount">จำนวนเงินรวม (บาท)</label><input id="fAmount" type="number" step="0.01" inputmode="decimal" required></div>
+      <div class="field"><label for="fAmount" id="fAmountLabel">จำนวนเงินรวม (บาท)</label><input id="fAmount" type="number" step="0.01" inputmode="decimal" required></div>
     </div>
     <div class="field" id="bizField"><label for="fBiz">ของใคร</label><div class="pick"><select id="fBiz"></select><input id="fBizNew" hidden placeholder="ชื่อร้าน/กิจการใหม่"></div></div>
     <div class="field"><label for="fName" id="fNameLabel">หมวด</label><div class="pick"><select id="fName"></select><input id="fNameNew" hidden placeholder="ชื่อหมวดใหม่"></div></div>
@@ -546,6 +549,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fPay" id="fPayLabel">จ่ายด้วย</label><select id="fPay"></select></div>
       <div class="field" id="accField"><label for="fAcc" id="fAccLabel">บัญชี</label><div class="pick"><select id="fAcc"></select><input id="fAccNew" hidden placeholder="ชื่อใหม่"></div></div>
     </div>
+    <div class="hint" id="tctHint" hidden></div>
     <div class="two" id="instRow" hidden>
       <div class="field"><label for="fInstN">ผ่อนกี่งวด</label><select id="fInstN"></select></div>
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
@@ -595,7 +599,12 @@ const DEF = {
     "ผ่อนจ่าย": ["TikTok Later","SPayLater","Lazada PayLater"]
   }
 };
-const PAYS = {expense: ["เงินสด","โอน/สแกนจ่าย","บัตรเครดิต","ผ่อนจ่าย"], income: ["เงินสด","โอน/สแกนจ่าย"], saving: ["โอน/สแกนจ่าย","เงินสด"]};
+// ไทยช่วยไทย co-payment: we pay 40% of the price, the government pays 60%.
+// The entry's amount is our 40% (so spending totals are real money); the full price is worked back from it.
+const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4;
+const isTct = e => e && e.kind === "expense" && e.pay === TCT;
+const tctFull = e => Math.round((Number(e.amount) || 0) / TCT_OURS * 100) / 100;
+const PAYS = {expense: ["เงินสด","โอน/สแกนจ่าย","บัตรเครดิต","ผ่อนจ่าย",TCT], income: ["เงินสด","โอน/สแกนจ่าย"], saving: ["โอน/สแกนจ่าย","เงินสด"]};
 const BIZ_LABEL = {Muan: "Muan (ร้านคาเฟ่)"};
 const bizLabel = b => BIZ_LABEL[b] || b;
 // Rows from the sheet have no shop field: the sheet used the name "Muan" for the cafe.
@@ -781,7 +790,7 @@ function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
 }
 
 /* ---------- entry list ---------- */
-function payText(e){ return [e.pay, e.account].filter(Boolean).join(" · "); }
+function payText(e){ return [e.pay, e.account].filter(Boolean).join(" · ") + (isTct(e) ? ` (ราคาเต็ม ${fmt(tctFull(e))} · รัฐออกให้ ${fmt(tctFull(e) - e.amount)})` : ""); }
 function entryList(box, list, key){
   box.textContent = "";
   const rows = [...list].sort((a,b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
@@ -1024,13 +1033,22 @@ function renderIncome(P){
 // Month at a glance: each day's spending, shaded by how much, with a dot on days with income.
 // Days the user has crossed off after re-checking them; kept in settings so every device sees them.
 // The income calendar keeps its own marks, apart from the expense (and Overall) calendar.
+// Each day is checked against every app/bank statement; the day is crossed off once all of them are ticked.
+// Days crossed off before the list existed count as all ticked.
+const CHECK_SRC = ["Make by KBank", "TikTok", "Shopee", "Lazada", "SCB", "Next", "ไทยช่วยไทย"];
 const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
-const isChecked = (iso, kind) => (settings[ckKey(kind)] || []).includes(iso);
-function toggleChecked(iso, kind){
-  const s = new Set(settings[ckKey(kind)] || []);
-  if (s.has(iso)) s.delete(iso); else s.add(iso);
-  store.setSetting(ckKey(kind), [...s].sort());
+const srcKey = kind => kind === "income" ? "checkSrcInc" : "checkSrc";
+const srcsOf = (iso, kind) => (settings[ckKey(kind)] || []).includes(iso) ? [...CHECK_SRC] : ((settings[srcKey(kind)] || {})[iso] || []).filter(s => CHECK_SRC.includes(s));
+const isChecked = (iso, kind) => srcsOf(iso, kind).length >= CHECK_SRC.length;
+function setSrcs(iso, kind, list){
+  const old = settings[ckKey(kind)] || [];
+  if (old.includes(iso)) store.setSetting(ckKey(kind), old.filter(d => d !== iso));
+  const m = {...(settings[srcKey(kind)] || {})};
+  if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
+  store.setSetting(srcKey(kind), m);
 }
+function toggleChecked(iso, kind){ setSrcs(iso, kind, isChecked(iso, kind) ? [] : [...CHECK_SRC]); }
+function toggleSrc(iso, kind, src){ const s = new Set(srcsOf(iso, kind)); if (s.has(src)) s.delete(src); else s.add(src); setSrcs(iso, kind, [...s]); }
 // kind "income" shades days by income instead (green, no dot).
 function calendar(box, ym, onPick, kind = "expense"){
   box.textContent = "";
@@ -1055,10 +1073,12 @@ function calendar(box, ym, onPick, kind = "expense"){
     b.append(el("span", "d", String(d)), el("span", "x", v ? fmt0(v) : ""));
     if (!isInc && inc.get(d)) b.append(el("span", "inc"));
     const ck = isChecked(iso, kind);
+    const nSrc = srcsOf(iso, kind).length;
     if (ck){ b.classList.add("chk"); b.append(el("span", "cross", "✕")); }
+    else if (nSrc) b.append(el("span", "part", `${nSrc}/${CHECK_SRC.length}`));
     const ex = exp.get(d) || 0, ic = inc.get(d) || 0;
     const parts = (isInc ? [`รายรับ ${fmt(ic)} บาท`, ex ? `รายจ่าย ${fmt(ex)} บาท` : ""] : [`รายจ่าย ${fmt(ex)} บาท`, ic ? `รายรับ ${fmt(ic)} บาท` : ""]).filter(Boolean);
-    b.setAttribute("aria-label", `${thaiDate(iso)} ${parts.join(" ")}${ck ? " เช็คแล้ว" : ""}`);
+    b.setAttribute("aria-label", `${thaiDate(iso)} ${parts.join(" ")}${ck ? " เช็คแล้ว" : nSrc ? ` เช็คแล้ว ${nSrc} จาก ${CHECK_SRC.length} แอป` : ""}`);
     b.title = `${weekday(iso)} ${thaiDate(iso)}\n${parts.join("\n")}${ck ? "\n✕ เช็คแล้ว" : ""}\nกดค้างเพื่อทำเครื่องหมายว่าเช็คแล้ว`;
     // press and hold crosses the day off without opening it
     let hold = null, held = false;
@@ -1082,10 +1102,20 @@ function calendar(box, ym, onPick, kind = "expense"){
   if (dayPick && dayPick.startsWith(ym)){
     const c = el("button", "chip", `เฉพาะ ${weekday(dayPick)} ${thaiDate(dayPick)} ✕`); c.type = "button"; c.setAttribute("aria-pressed", "true");
     c.addEventListener("click", () => { dayPick = ""; render(); });
-    const on = isChecked(dayPick, kind);
-    const t = el("button", "chip chk-btn" + (on ? " on" : ""), on ? "✕ เช็ควันนี้แล้ว (แตะเพื่อยกเลิก)" : "☐ ทำเครื่องหมายว่าเช็คแล้ว"); t.type = "button"; t.setAttribute("aria-pressed", String(on));
-    const day = dayPick; t.addEventListener("click", () => toggleChecked(day, kind));
-    foot.append(c, t);
+    const day = dayPick, have = srcsOf(day, kind), on = have.length >= CHECK_SRC.length;
+    const box2 = el("div", "srcchk");
+    box2.append(el("div", "hint", `เช็คกับแต่ละแอปแล้ว ${have.length}/${CHECK_SRC.length}${on ? " ✕ ครบแล้ว" : ""}`));
+    const row = el("div", "chips");
+    CHECK_SRC.forEach(src => {
+      const has = have.includes(src);
+      const t = el("button", "chip chk-btn" + (has ? " on" : ""), (has ? "✓ " : "☐ ") + src); t.type = "button"; t.setAttribute("aria-pressed", String(has));
+      t.addEventListener("click", () => toggleSrc(day, kind, src));
+      row.append(t);
+    });
+    const all = el("button", "chip", on ? "ล้างทั้งหมด" : "ติ๊กครบทุกแอป"); all.type = "button";
+    all.addEventListener("click", () => toggleChecked(day, kind));
+    row.append(all); box2.append(row);
+    foot.append(c, box2);
   }
   box.append(foot);
 }
@@ -1109,6 +1139,11 @@ function renderExpense(P){
   const payKey = e => e.pay ? (e.pay === "เงินสด" ? "เงินสด" : (e.account || e.pay)) : "ไม่ระบุ";
   donut($("ePiePay"), totalsBy(L, payKey), "expPay", all, payKey, "จ่ายด้วย");
   chips($("eChips"), byCat, "expense");
+  const tct = L.filter(isTct), tp = $("tctPanel"); tp.hidden = !tct.length;
+  if (tct.length){
+    const ours = r2(tct.reduce((a, e) => a + Number(e.amount), 0)), full = r2(tct.reduce((a, e) => a + tctFull(e), 0));
+    $("tctSum").textContent = `${tct.length} รายการ · ราคาเต็ม ${fmt(full)} · เราจ่าย ${fmt(ours)} · รัฐออกให้ ${fmt(r2(full - ours))} บาท`;
+  }
   const cy = calYM(); $("eCalTitle").textContent = `ปฏิทินรายจ่าย ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("eCal"), cy, pickDay);
   entryList($("eList"), L.filter(e => (!listFilter.expense || (e.name || "ไม่ระบุหมวด") === listFilter.expense) && (!dayPick || e.date === dayPick)), "expense");
@@ -1613,7 +1648,8 @@ function fillNotes(keep){
 }
 function fillAcc(keep){
   const pay = $("fPay").value;
-  $("accField").hidden = pay === "เงินสด";
+  $("accField").hidden = pay === "เงินสด" || pay === TCT;
+  showTct();
   $("fAccLabel").textContent = pay === "ผ่อนจ่าย" ? "ผ่อนกับ" : pay === "บัตรเครดิต" ? "บัตร" : kind === "income" ? "เข้าบัญชี" : "จากบัญชี";
   const used = freq(entries.filter(e => e.pay === pay), e => e.account);
   fillPick(pk.acc, [{values: withAll(used, DEF.acc[pay] || [])}], keep);
@@ -1759,6 +1795,7 @@ function openForm(e){
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
     if (e.pay) $("fPay").value = e.pay;
     fillAcc(e.account || "");
+    if (isTct(e)){ $("fAmount").value = tctFull(e); itemGross = r2(tctFull(e) + (e.itemDisc || 0)); showTct(); }
   } else {
     if (page === "shop") { setPick(pk.biz, shopBiz); fillNames(""); fillNotes(""); }
     $("fDate").value = mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO;
@@ -1811,7 +1848,8 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "income"){ const t = $("fTime").value, py = pickVal(pk.payer); if (t) base.time = t; if (py) base.payer = py; }
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
-  const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด") base.account = acc;
+  if (kind === "expense" && base.pay === TCT) base.amount = r2(amount * TCT_OURS);
+  const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด" && base.pay !== TCT) base.account = acc;
   if (editing?.src === "sheet"){
     const upd = {...editing, date, ym: ymOf(date), name, amount};
     ["unitPrice", "qty"].forEach(k => delete upd[k]);
@@ -1895,7 +1933,18 @@ function showBillUI(){
   line("รวมก่อนลด", fmt(gross));
   if (disc) line("ส่วนลด", "−" + fmt(disc));
   line("ยอดจ่ายจริง", fmt(net), "net");
+  if ($("fPay").value === TCT && kind === "expense"){ line("เราจ่าย 40%", fmt(r2(net * TCT_OURS))); line("รัฐออกให้ 60%", fmt(r2(net - r2(net * TCT_OURS)))); }
+  showTct();
 }
+// Under the amount: what we pay and what the government pays when the bill is on ไทยช่วยไทย.
+function showTct(){
+  const on = kind === "expense" && $("fPay").value === TCT, h = $("tctHint");
+  $("fAmountLabel").textContent = on ? "ราคาเต็ม (บาท)" : "จำนวนเงินรวม (บาท)";
+  const full = parseFloat($("fAmount").value);
+  h.hidden = !on || bill.length > 0 || !(full > 0);
+  if (!h.hidden){ const ours = r2(full * TCT_OURS); h.textContent = `ไทยช่วยไทย: เราจ่าย 40% = ${fmt(ours)} บาท · รัฐออกให้ 60% = ${fmt(r2(full - ours))} บาท (รายจ่ายนับเฉพาะส่วนที่เราจ่าย)`; }
+}
+$("fAmount").addEventListener("input", showTct);
 function billTotals(pending){
   const gross = Math.round(bill.concat(pending ? [pending] : []).reduce((a, it) => a + it.amount, 0) * 100) / 100;
   const v = parseFloat($("billDisc").value) || 0;
@@ -1935,7 +1984,7 @@ function openBill(billId){
   setPick(pk.biz, bizOf(f)); fillNames(""); fillNotes("");
   setPick(pk.shop, f.shop || ""); fillPays(f.pay || ""); if (f.pay) $("fPay").value = f.pay; fillAcc(f.account || "");
   const keep = ["name", "biz", "note", "unitPrice", "qty", "unit", "itemDisc", "size", "sizeUnit"];
-  bill = items.map(x => { const it = {}; keep.forEach(k => { if (x[k] !== undefined && x[k] !== "") it[k] = x[k]; }); it.amount = Math.round(((Number(x.amount) || 0) + (Number(x.disc) || 0)) * 100) / 100; return it; });
+  bill = items.map(x => { const it = {}; keep.forEach(k => { if (x[k] !== undefined && x[k] !== "") it[k] = x[k]; }); it.amount = Math.round(((Number(x.amount) || 0) / (f.pay === TCT ? TCT_OURS : 1) + (Number(x.disc) || 0)) * 100) / 100; return it; });
   const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0);
   $("billDisc").value = disc ? Math.round(disc * 100) / 100 : ""; $("billDiscType").value = "baht";
   ["fAmount", "fUnit", "fQty", "fItemDisc", "fSize"].forEach(id => $(id).value = "");
@@ -1975,7 +2024,7 @@ $("billSave").addEventListener("click", async () => {
   const out = bill.map((it, i) => {
     const share = i === bill.length - 1 ? Math.round(left * 100) / 100 : Math.round(disc * it.amount / gross * 100) / 100;
     left -= share;
-    const e = {...shared, ...it, id: oldIds.shift() || store.newId(), amount: Math.round((it.amount - share) * 100) / 100};
+    const e = {...shared, ...it, id: oldIds.shift() || store.newId(), amount: Math.round((it.amount - share) * (shared.pay === TCT ? TCT_OURS : 1) * 100) / 100};
     if (share > 0) e.disc = share;
     return e;
   });
