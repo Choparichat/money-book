@@ -1023,11 +1023,13 @@ function renderIncome(P){
 
 // Month at a glance: each day's spending, shaded by how much, with a dot on days with income.
 // Days the user has crossed off after re-checking them; kept in settings so every device sees them.
-const isChecked = iso => (settings.checkedDays || []).includes(iso);
-function toggleChecked(iso){
-  const s = new Set(settings.checkedDays || []);
+// The income calendar keeps its own marks, apart from the expense (and Overall) calendar.
+const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
+const isChecked = (iso, kind) => (settings[ckKey(kind)] || []).includes(iso);
+function toggleChecked(iso, kind){
+  const s = new Set(settings[ckKey(kind)] || []);
   if (s.has(iso)) s.delete(iso); else s.add(iso);
-  store.setSetting("checkedDays", [...s].sort());
+  store.setSetting(ckKey(kind), [...s].sort());
 }
 // kind "income" shades days by income instead (green, no dot).
 function calendar(box, ym, onPick, kind = "expense"){
@@ -1052,7 +1054,7 @@ function calendar(box, ym, onPick, kind = "expense"){
     if (v > 0){ const h = el("span", "heat"); h.style.opacity = (0.1 + 0.45 * v / max).toFixed(2); b.append(h); }
     b.append(el("span", "d", String(d)), el("span", "x", v ? fmt0(v) : ""));
     if (!isInc && inc.get(d)) b.append(el("span", "inc"));
-    const ck = isChecked(iso);
+    const ck = isChecked(iso, kind);
     if (ck){ b.classList.add("chk"); b.append(el("span", "cross", "✕")); }
     const ex = exp.get(d) || 0, ic = inc.get(d) || 0;
     const parts = (isInc ? [`รายรับ ${fmt(ic)} บาท`, ex ? `รายจ่าย ${fmt(ex)} บาท` : ""] : [`รายจ่าย ${fmt(ex)} บาท`, ic ? `รายรับ ${fmt(ic)} บาท` : ""]).filter(Boolean);
@@ -1061,7 +1063,7 @@ function calendar(box, ym, onPick, kind = "expense"){
     // press and hold crosses the day off without opening it
     let hold = null, held = false;
     const cancel = () => clearTimeout(hold);
-    b.addEventListener("pointerdown", () => { held = false; hold = setTimeout(() => { held = true; toggleChecked(iso); }, 550); });
+    b.addEventListener("pointerdown", () => { held = false; hold = setTimeout(() => { held = true; toggleChecked(iso, kind); }, 550); });
     ["pointerup", "pointerleave", "pointercancel"].forEach(t => b.addEventListener(t, cancel));
     b.addEventListener("contextmenu", ev => ev.preventDefault());
     b.addEventListener("click", () => { if (held){ held = false; return; } onPick(iso); });
@@ -1073,15 +1075,16 @@ function calendar(box, ym, onPick, kind = "expense"){
   const k2 = el("span", "k"); k2.append(el("span", "dot"), document.createTextNode("มีรายรับ"));
   const tot = [...main.values()].reduce((a, b) => a + b, 0), n = main.size;
   const withData = new Set([...exp.keys(), ...inc.keys()]);
-  const nChk = [...withData].filter(d => isChecked(`${ym}-${pad(d)}`)).length;
-  const k3 = el("span", "k"); k3.append(el("span", "xk", "✕"), document.createTextNode(`เช็คแล้ว ${nChk}/${withData.size} วัน`));
+  const days2 = isInc ? new Set(inc.keys()) : withData;
+  const nChk = [...days2].filter(d => isChecked(`${ym}-${pad(d)}`, kind)).length;
+  const k3 = el("span", "k"); k3.append(el("span", "xk", "✕"), document.createTextNode(`เช็คแล้ว ${nChk}/${days2.size} วัน`));
   foot.append(...(isInc ? [k1, k3] : [k1, k2, k3]), el("span", "", isInc ? `มีรายรับ ${n} วัน · รวม ${fmt0(tot)} บาท` : `ใช้จ่าย ${n} วัน · เฉลี่ยวันละ ${fmt0(n ? tot / days : 0)} บาท`));
   if (dayPick && dayPick.startsWith(ym)){
     const c = el("button", "chip", `เฉพาะ ${weekday(dayPick)} ${thaiDate(dayPick)} ✕`); c.type = "button"; c.setAttribute("aria-pressed", "true");
     c.addEventListener("click", () => { dayPick = ""; render(); });
-    const on = isChecked(dayPick);
+    const on = isChecked(dayPick, kind);
     const t = el("button", "chip chk-btn" + (on ? " on" : ""), on ? "✕ เช็ควันนี้แล้ว (แตะเพื่อยกเลิก)" : "☐ ทำเครื่องหมายว่าเช็คแล้ว"); t.type = "button"; t.setAttribute("aria-pressed", String(on));
-    const day = dayPick; t.addEventListener("click", () => toggleChecked(day));
+    const day = dayPick; t.addEventListener("click", () => toggleChecked(day, kind));
     foot.append(c, t);
   }
   box.append(foot);
