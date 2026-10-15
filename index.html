@@ -1904,7 +1904,8 @@ function openForm(e){
     if (isTct(e)){ $("fAmount").value = tctFull(e); itemGross = r2(tctFull(e) + (e.itemDisc || 0)); showTct(); }
   } else {
     if (page === "shop") { setPick(pk.biz, shopBiz); fillNames(""); fillNotes(""); }
-    $("fDate").value = mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO;
+    // a day picked on the calendar is the day the new entry goes on
+    $("fDate").value = dayPick || (mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO);
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
   }
   sheetMode(e);
