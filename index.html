@@ -102,6 +102,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .pp{display:grid;gap:8px;margin-top:10px}.pp-card{border:1px solid var(--line);border-radius:10px;padding:8px 10px}.pp-card summary{cursor:pointer}
 .pp-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) minmax(0,7.5rem);gap:8px;align-items:center;padding-top:6px}.pp-row input[type=checkbox]{width:20px;height:20px}
 .pp-row input[type=date],.pp-row input[type=number]{min-width:0;width:100%}.pp-row.late input[type=date]{color:var(--exp)}.pp-form{display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px}.pp>.btn.sm{justify-self:start}
+.pl-alert-items{grid-column:1/-1;display:grid;padding-left:8px}.pl-alert-items .pl-item{font-size:.92rem}
 .pl-row{display:grid;gap:8px}.pl-grp{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px}.pl-grp summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pl-grp summary .n{margin-left:auto;font-weight:600}.pl-item{all:unset;cursor:pointer;display:grid;width:100%;box-sizing:border-box;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:6px 0;border-top:1px solid var(--line)}.pl-item:focus-visible{outline:2px solid var(--fg);border-radius:6px}
 .pl-paid{display:flex;gap:8px;align-items:center;margin-top:6px}.pl-paid input{width:20px;height:20px}
@@ -1687,7 +1688,17 @@ function renderPayAlert(){
     o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${d.pl.items.length} รายการ` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
     const ok = el("button", "btn sm", "จ่ายแล้ว"); ok.type = "button";
     ok.addEventListener("click", () => d.pl ? store.setSetting("payLaterPaid", {...plPaid(), [d.date]: true}) : editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
-    row.append(o, ok); ul.append(row);
+    row.append(o, ok);
+    if (d.pl){
+      const items = el("div", "pl-alert-items");
+      [...d.pl.items].sort((a, b) => a.date < b.date ? -1 : 1).forEach(e => {
+        const b = el("button", "pl-item"); b.type = "button";
+        b.append(el("span", "", `${thaiDate(e.date)} · ${e.note || e.name}${e.note && e.name ? " (" + e.name + ")" : ""}`), el("span", "", fmt(e.amount)));
+        b.addEventListener("click", () => openForm(e)); items.append(b);
+      });
+      row.append(items);
+    }
+    ul.append(row);
   });
 }
 
