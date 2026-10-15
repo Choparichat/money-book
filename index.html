@@ -2255,8 +2255,14 @@ function initStore(){
   const JSDATE = /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT/;
   const TEXTF = ["note", "name", "group", "biz", "unit", "shop", "pay", "account", "inst", "who", "payer", "sizeUnit", "side"];
   const clean = e => { for (const k of TEXTF) if (typeof e[k] === "string" && JSDATE.test(e[k])){ const [, mon, day] = e[k].split(" "); e[k] = `${+day}-${"JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(mon) / 3 + 1}`; } return e; };
-  const read = () => ls.get(KEY, []).map(clean);
-  const write = list => { list = list.map(clean); ls.set(KEY, list); subs.forEach(f => f(list)); };
+  // Words always written one way, whatever was typed (e.g. หมาล่า → หม่าล่า), in the detail and category.
+  const WORDS = {"หมาล่า": "หม่าล่า"};
+  const fixWords = v => { for (const [from, to] of Object.entries(WORDS)) v = v.split(from).join(to); return v; };
+  const needsFix = e => ["note", "name"].some(k => typeof e[k] === "string" && fixWords(e[k]) !== e[k]);
+  const clean0 = clean;
+  const cleanAll = e => { clean0(e); for (const k of ["note", "name"]) if (typeof e[k] === "string") e[k] = fixWords(e[k]); return e; };
+  const read = () => ls.get(KEY, []).map(cleanAll);
+  const write = list => { list = list.map(cleanAll); ls.set(KEY, list); subs.forEach(f => f(list)); };
   // Budget plans and saving goals: kept per device and in the sheet's "ตั้งค่าแอป" tab.
   settings = ls.get(SET, null) || {funds: [{id: "fjp", name: "ออมเงินไปญี่ปุ่นกับที่รัก", group: "ออมไปญี่ปุ่น", target: 0, due: ""}]};
   // The starter Japan goal also counts the other Japan groups used in past years, e.g. "ออมไปญี่ปุ่น (ME)".
@@ -2367,7 +2373,10 @@ function initStore(){
         list = list.filter(e => !gone.has(e.id));
         for (const id of late) if (mine.has(id)){ const i = list.findIndex(e => e.id === id); if (i >= 0) list[i] = mine.get(id); else list.push(mine.get(id)); }
       }
+      // the app's own rows still spelled the old way are saved back with the fixed spelling
+      const respell = list.filter(e => e.src !== "sheet" && needsFix(e));
       write(list); idle();
+      if (respell.length) enqueue(...respell.map(e => ({op: "put", entry: e})));
     }
     catch (err){ status(`โหลดจาก Google Sheet ไม่ได้: ${err.message} (ใช้ข้อมูลในเครื่องไปก่อน)`, true); }
   }
