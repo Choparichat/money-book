@@ -99,6 +99,9 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .neg{color:var(--exp)!important}
 .hint{font-size:.8rem;color:var(--muted)}
 .toast{font-size:.85rem;min-height:1.2em}
+.pp{display:grid;gap:8px;margin-top:10px}.pp-card{border:1px solid var(--line);border-radius:10px;padding:8px 10px}.pp-card summary{cursor:pointer}
+.pp-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) minmax(0,7.5rem);gap:8px;align-items:center;padding-top:6px}.pp-row input[type=checkbox]{width:20px;height:20px}
+.pp-row input[type=date],.pp-row input[type=number]{min-width:0;width:100%}.pp-row.late input[type=date]{color:var(--exp)}.pp-form{display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px}.pp>.btn.sm{justify-self:start}
 .empty{padding:20px 8px;text-align:center;color:var(--muted)}
 
 /* donut */
@@ -314,6 +317,11 @@ details summary{cursor:pointer;font-weight:500}
       <p class="hint" style="margin:0">รายการที่ติ๊ก "เตือนให้กลับมาเช็ค" ไว้ แตะเพื่อเปิดแล้วเติมรายละเอียด เติมเสร็จกด "เช็คแล้ว" ได้เลย</p>
       <div id="fuAlertList" class="sa"></div>
     </div>
+    <div class="panel alert" id="payAlert" hidden>
+      <h2 id="payAlertTitle"></h2>
+      <p class="hint" style="margin:0">งวดผ่อน / Pay Later ที่เลยกำหนดหรือครบกำหนดภายใน 7 วัน จ่ายแล้วกด "จ่ายแล้ว"</p>
+      <div id="payAlertList" class="sa"></div>
+    </div>
     <div class="panel alert" id="sizeAlert" hidden>
       <h2 id="sizeAlertTitle"></h2>
       <p class="hint" style="margin:0">ใส่น้ำหนักหรือปริมาณต่อ 1 หน่วยที่ซื้อ (เช่น อัญชัน 1 ถุง = 100 g) เพื่อคิดต้นทุนต่อกรัม ใส่ครั้งเดียว แอปจำให้ทุกครั้งที่ซื้อของนี้ ถ้าจำไม่ได้ ไว้ชั่งแล้วค่อยมาใส่</p>
@@ -332,7 +340,7 @@ details summary{cursor:pointer;font-weight:500}
     </div>
     <div class="grid2">
       <div class="panel"><div class="panel-head"><h2>เป้าหมายการออม</h2><button class="btn sm" type="button" data-go="saving">จัดการ</button></div><div id="oFunds"></div></div>
-      <div class="panel"><h2>ยอดผ่อนที่ยังต้องจ่าย</h2><div id="oInst"></div></div>
+      <div class="panel"><h2>ยอดผ่อน / Pay Later ที่ยังต้องจ่าย</h2><div id="oInst"></div></div>
     </div>
     <div class="panel"><div class="panel-head"><h2>เทียบกับแผนเดือนนี้</h2><button class="btn sm" type="button" data-go="plan">ดูแผน</button></div><div id="oPlan"></div></div>
     <div class="panel">
@@ -666,6 +674,7 @@ const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls)
 const TH_WD = ["อา.","จ.","อ.","พ.","พฤ.","ศ.","ส."];
 const weekday = iso => TH_WD[new Date(+iso.slice(0,4), +iso.slice(5,7) - 1, +iso.slice(8,10)).getDay()];
 const thaiDate = iso => { const [y,m,d] = iso.split("-"); return `${d}/${m}/${y}`; };
+const addDays = (iso, n) => { const [y,m,d] = iso.split("-").map(Number), t = new Date(y, m - 1, d + n); return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`; };
 const addMonths = (ym, n) => { let [y,m] = ym.split("-").map(Number); m += n; while (m < 1){ m += 12; y--; } while (m > 12){ m -= 12; y++; } return `${y}-${pad(m)}`; };
 const signedSaving = e => (e.side === "ขาย" ? -1 : 1) * (Number(e.amount)||0);
 
@@ -1074,7 +1083,7 @@ function renderSizeAlert(){
   if (list.length > 8) ul.append(el("div", "hint", `และอีก ${list.length - 8} รายการ ใส่ชุดนี้ก่อน แล้วรายการที่เหลือจะขึ้นมาแทน`));
 }
 function renderOverall(P){
-  renderFollowAlert(); renderSizeAlert();
+  renderFollowAlert(); renderSizeAlert(); renderPayAlert();
   const cy = calYM(); $("oCalTitle").textContent = `ปฏิทิน ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("oCal"), cy, pickDay);
   const s = sums(P);
@@ -1500,9 +1509,11 @@ $("fundDel").addEventListener("click", () => {
 function renderInstallments(box){
   box.textContent = "";
   const future = entries.filter(e => e.instId && e.date > todayISO);
-  if (!future.length){ box.append(el("div", "empty", "ไม่มียอดผ่อนค้าง เลือก \"ผ่อนจ่าย\" ตอนบันทึกรายจ่าย แล้วแอปจะแบ่งงวดให้")); return; }
+  const dues = planDues().filter(d => !d.paid);
+  if (!future.length && !dues.length){ box.append(el("div", "empty", "ไม่มียอดผ่อนค้าง กด \"＋ เพิ่มตารางจ่าย\" ด้านล่างได้เลย")); renderPayPlans(box); return; }
   const by = new Map();
   future.forEach(e => { const k = e.account || "ผ่อน"; const v = by.get(k) || {total: 0, next: null, n: 0, plans: new Set()}; v.total += Number(e.amount)||0; v.n++; v.plans.add(e.instId); if (!v.next || e.date < v.next.date) v.next = e; by.set(k, v); });
+  dues.forEach(d => { const k = d.plan.account || "ผ่อน"; const v = by.get(k) || {total: 0, next: null, n: 0, plans: new Set()}; v.total += d.amount; v.n++; v.plans.add(d.plan.id); if (!v.next || d.date < v.next.date) v.next = d; by.set(k, v); });
   const t = el("table"); const tb = el("tbody");
   const hd = el("thead"); const hr = el("tr"); ["ผ่อนกับ", "คงเหลือ", "งวดถัดไป"].forEach((x, i) => hr.append(el("th", i === 1 ? "n" : "", x))); hd.append(hr); t.append(hd);
   let sum = 0;
@@ -1515,6 +1526,94 @@ function renderInstallments(box){
   t.append(tb);
   const tf = el("tfoot"); const fr = el("tr"); fr.append(el("td", "", "รวม"), el("td", "n", fmt(sum)), el("td")); tf.append(fr); t.append(tf);
   const sc = el("div", "scroll"); sc.append(t); box.append(sc);
+  renderPayPlans(box);
+}
+
+/* ---------- pay-later schedules ---------- */
+// What was bought stays recorded on the day it was bought, in its own category.
+// A schedule only tracks when the money is due, so it is never counted as spending a second time.
+const payPlans = () => settings.payPlans || [];
+const savePlans = list => store.setSetting("payPlans", list);
+const planDues = () => payPlans().flatMap(p => (p.dues || []).map((d, i) => ({...d, amount: Number(d.amount) || 0, i, plan: p})));
+// the same split the shop uses: equal parts rounded down, the last one takes the satang left over
+function splitDues(total, n, first){
+  const per = Math.floor(total / n * 100) / 100, day = Number(first.slice(8, 10));
+  return Array.from({length: n}, (_, i) => {
+    const ym = addMonths(first.slice(0, 7), i), dim = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    return {date: `${ym}-${pad(Math.min(day, dim))}`, amount: i === n - 1 ? c2(total - per * (n - 1)) : per, paid: false};
+  });
+}
+function editPlan(id, f){ savePlans(payPlans().map(p => p.id === id ? f(JSON.parse(JSON.stringify(p))) : p)); }
+let planOpen = null;
+function renderPayPlans(box){
+  const wrap = el("div", "pp"); box.append(wrap);
+  payPlans().forEach(p => {
+    const dues = p.dues || [], left = c2(dues.filter(d => !d.paid).reduce((a, d) => a + (Number(d.amount) || 0), 0));
+    const total = c2(dues.reduce((a, d) => a + (Number(d.amount) || 0), 0));
+    const card = el("details", "pp-card"); card.open = planOpen === p.id;
+    card.addEventListener("toggle", () => { if (card.open) planOpen = p.id; else if (planOpen === p.id) planOpen = null; });
+    const sum = el("summary");
+    sum.append(el("strong", "", p.label || "ผ่อน"), el("span", "hint", ` ${p.account ? p.account + " · " : ""}รวม ${fmt(total)} · ${left ? "เหลือ " + fmt(left) : "จ่ายครบแล้ว ✓"}`));
+    card.append(sum);
+    dues.forEach((d, i) => {
+      const row = el("div", "pp-row" + (!d.paid && d.date < todayISO ? " late" : ""));
+      const ck = el("input"); ck.type = "checkbox"; ck.checked = !!d.paid; ck.title = "จ่ายแล้ว";
+      ck.addEventListener("change", () => editPlan(p.id, q => { q.dues[i].paid = ck.checked; return q; }));
+      const dt = el("input"); dt.type = "date"; dt.value = d.date;
+      dt.addEventListener("change", () => { if (dt.value) editPlan(p.id, q => { q.dues[i].date = dt.value; return q; }); });
+      const am = el("input"); am.type = "number"; am.step = "0.01"; am.inputMode = "decimal"; am.value = d.amount;
+      am.addEventListener("change", () => { const v = c2(parseFloat(am.value) || 0); editPlan(p.id, q => { q.dues[i].amount = v; return q; }); });
+      row.append(ck, el("span", "hint", `งวด ${i + 1}`), dt, am);
+      card.append(row);
+    });
+    const del = el("button", "btn sm danger", "ลบตารางนี้"); del.type = "button";
+    let armed = false;
+    del.addEventListener("click", () => {
+      if (!armed){ armed = true; del.textContent = "กดอีกครั้งเพื่อลบ"; setTimeout(() => { armed = false; del.textContent = "ลบตารางนี้"; }, 3000); return; }
+      savePlans(payPlans().filter(x => x.id !== p.id));
+    });
+    card.append(el("p", "hint", "ติ๊กช่องหน้าวันที่เมื่อจ่ายงวดนั้นแล้ว วันที่และยอดแต่ละงวดแก้ได้"), del);
+    wrap.append(card);
+  });
+  const add = el("button", "btn sm", "＋ เพิ่มตารางจ่าย (Pay Later / ผ่อน)"); add.type = "button";
+  const form = el("div", "pp-form"); form.hidden = true;
+  const fld = (label, inp) => { const f = el("div", "field"); const l = el("label", "", label); f.append(l, inp); return f; };
+  const lab = el("input"); lab.placeholder = "เช่น TikTok ครีม + จอเสริม";
+  const acc = el("input"); acc.value = "TikTok Later"; acc.setAttribute("list", "ppAccList");
+  const dl = el("datalist"); dl.id = "ppAccList"; (DEF.acc["ผ่อนจ่าย"] || []).forEach(a => dl.append(opt(a, a)));
+  const tot = el("input"); tot.type = "number"; tot.step = "0.01"; tot.inputMode = "decimal"; tot.placeholder = "ยอดรวมที่ต้องจ่าย";
+  const n = el("select"); for (let k = 1; k <= 12; k++) n.append(opt(String(k), k + " งวด")); n.value = "3";
+  const first = el("input"); first.type = "date"; first.value = addMonths(todayISO.slice(0, 7), 1) + "-10";
+  const ok = el("button", "btn sm", "สร้างตาราง"); ok.type = "button";
+  ok.addEventListener("click", () => {
+    const t = c2(parseFloat(tot.value) || 0);
+    if (!t || !first.value){ toast("ใส่ยอดรวมและวันจ่ายงวดแรก", true); return; }
+    const id = "pp" + Date.now().toString(36);
+    planOpen = id;
+    savePlans([...payPlans(), {id, label: lab.value.trim() || "ผ่อน", account: acc.value.trim(), dues: splitDues(t, Number(n.value), first.value)}]);
+  });
+  const two = el("div", "two"); two.append(fld("ชื่อ", lab), fld("จ่ายกับ", acc));
+  const three = el("div", "two"); three.append(fld("ยอดรวม (บาท)", tot), fld("กี่งวด", n));
+  form.append(two, three, fld("จ่ายงวดแรกวันที่", first), dl,
+    el("p", "hint", "ของที่ซื้อให้บันทึกเป็นรายจ่ายตามวันที่ซื้อเหมือนเดิม ตารางนี้ไว้เตือนว่าเดือนไหนต้องจ่ายเท่าไร ไม่นับเป็นรายจ่ายซ้ำ"), ok);
+  add.addEventListener("click", () => { form.hidden = !form.hidden; if (!form.hidden) lab.focus(); });
+  wrap.append(add, form);
+}
+// unpaid dues that are late or due within a week
+function renderPayAlert(){
+  const box = $("payAlert"), soon = addDays(todayISO, 7);
+  const list = planDues().filter(d => !d.paid && d.date <= soon).sort((a, b) => a.date < b.date ? -1 : 1);
+  box.hidden = !list.length; if (!list.length) return;
+  $("payAlertTitle").textContent = `💳 ถึงกำหนดจ่าย ${list.length} งวด`;
+  const ul = $("payAlertList"); ul.textContent = "";
+  list.forEach(d => {
+    const row = el("div", "fu-row"), late = d.date < todayISO;
+    const o = el("div", "fu-open");
+    o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
+    const ok = el("button", "btn sm", "จ่ายแล้ว"); ok.type = "button";
+    ok.addEventListener("click", () => editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
+    row.append(o, ok); ul.append(row);
+  });
 }
 
 /* ---------- plan (budget vs actual) ---------- */
