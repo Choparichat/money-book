@@ -371,7 +371,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="ePie"></div></div>
       <div class="panel"><h2>จ่ายด้วยอะไร</h2><div id="ePiePay"></div></div>
     </div>
-    <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (เราจ่าย 40% · รัฐออกให้ 60%)</h2><p class="hint" style="margin:0" id="tctSum"></p></div>
+    <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (รัฐออก 60% ไม่เกินวันละ 200 บาท)</h2><p class="hint" style="margin:0" id="tctSum"></p></div>
     <div class="panel"><div class="panel-head"><h2 id="eCalTitle">ปฏิทินรายจ่าย</h2><span class="hint">แตะวันที่เพื่อดูรายการของวันนั้น</span></div><div id="eCal"></div></div>
     <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
   </section>
@@ -609,11 +609,18 @@ const DEF = {
     "ผ่อนจ่าย": ["TikTok Later","SPayLater","Lazada PayLater"]
   }
 };
-// ไทยช่วยไทย co-payment: we pay 40% of the price, the government pays 60%.
-// The entry's amount is our 40% (so spending totals are real money); the full price is worked back from it.
-const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4;
+// ไทยช่วยไทย co-payment: the government pays 60% of the price but at most 200 baht a day in all; we pay the rest.
+// The entry's amount is what we paid (so spending totals are real money); the government's share is kept per entry
+// in synced settings (tctGov). Entries saved before that keep the plain 60/40 split.
+const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4, TCT_CAP = 200;
 const isTct = e => e && e.kind === "expense" && e.pay === TCT;
-const tctFull = e => Math.round((Number(e.amount) || 0) / TCT_OURS * 100) / 100;
+const c2 = v => Math.round(v * 100) / 100;
+const tctGovOf = e => { const m = (settings.tctGov || {})[e.id]; return m != null ? Number(m) : c2((Number(e.amount) || 0) / TCT_OURS * (1 - TCT_OURS)); };
+const tctFull = e => c2((Number(e.amount) || 0) + tctGovOf(e));
+// government money already used on that day by other ไทยช่วยไทย entries
+const tctUsed = (date, skip = []) => c2(entries.filter(e => isTct(e) && e.date === date && !skip.includes(e.id)).reduce((a, e) => a + tctGovOf(e), 0));
+const tctSplit = (full, used) => { const gov = Math.max(0, Math.min(c2(full * (1 - TCT_OURS)), c2(TCT_CAP - used))); return {gov, ours: c2(full - gov)}; };
+const setGov = m => store.setSetting("tctGov", {...(settings.tctGov || {}), ...m});
 const PAYS = {expense: ["เงินสด","โอน/สแกนจ่าย","บัตรเครดิต","ผ่อนจ่าย",TCT], income: ["เงินสด","โอน/สแกนจ่าย"], saving: ["โอน/สแกนจ่าย","เงินสด"]};
 const BIZ_LABEL = {Muan: "Muan (ร้านคาเฟ่)"};
 const bizLabel = b => BIZ_LABEL[b] || b;
@@ -1955,7 +1962,8 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "income"){ const t = $("fTime").value, py = pickVal(pk.payer); if (t) base.time = t; if (py) base.payer = py; }
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
-  if (kind === "expense" && base.pay === TCT) base.amount = r2(amount * TCT_OURS);
+  let govNow = null;
+  if (kind === "expense" && base.pay === TCT){ const sp = tctSplit(amount, tctUsed(date, editing ? [editing.id] : [])); base.amount = sp.ours; govNow = sp.gov; }
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด" && base.pay !== TCT) base.account = acc;
   if (editing?.src === "sheet"){
     const upd = {...editing, date, ym: ymOf(date), name, amount};
@@ -1986,6 +1994,7 @@ $("entryForm").addEventListener("submit", async ev => {
   try {
     await store.save(out);
     rememberSizes(out);
+    if (govNow != null) setGov({[out[0].id]: govNow});
     const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
     if (editing){ $("dlg").close(); return; }
     const where = `${name}${base.note ? " · " + base.note : ""} วันที่ ${thaiDate(date)}`;
@@ -2045,7 +2054,7 @@ function showBillUI(){
   line("รวมก่อนลด", fmt(gross));
   if (disc) line("ส่วนลด", "−" + fmt(disc));
   line("ยอดจ่ายจริง", fmt(net), "net");
-  if ($("fPay").value === TCT && kind === "expense"){ line("เราจ่าย 40%", fmt(r2(net * TCT_OURS))); line("รัฐออกให้ 60%", fmt(r2(net - r2(net * TCT_OURS)))); }
+  if ($("fPay").value === TCT && kind === "expense"){ const sp = tctSplit(net, tctUsed($("fDate").value, billEdit ? billEdit.ids : [])); line("รัฐออกให้", fmt(sp.gov)); line("เราจ่ายเอง", fmt(sp.ours)); }
   showTct();
 }
 // Under the amount: what we pay and what the government pays when the bill is on ไทยช่วยไทย.
@@ -2054,9 +2063,14 @@ function showTct(){
   $("fAmountLabel").textContent = on ? "ราคาเต็ม (บาท)" : "จำนวนเงินรวม (บาท)";
   const full = parseFloat($("fAmount").value);
   h.hidden = !on || bill.length > 0 || !(full > 0);
-  if (!h.hidden){ const ours = r2(full * TCT_OURS); h.textContent = `ไทยช่วยไทย: เราจ่าย 40% = ${fmt(ours)} บาท · รัฐออกให้ 60% = ${fmt(r2(full - ours))} บาท (รายจ่ายนับเฉพาะส่วนที่เราจ่าย)`; }
+  if (!h.hidden){
+    const used = tctUsed($("fDate").value, editing ? [editing.id] : []), sp = tctSplit(full, used);
+    const capped = sp.gov < c2(full * (1 - TCT_OURS));
+    h.textContent = `ไทยช่วยไทย: รัฐออกให้ ${fmt(sp.gov)} บาท · เราจ่ายเอง ${fmt(sp.ours)} บาท` + (capped ? ` (รัฐออก 60% แต่ไม่เกินวันละ ${TCT_CAP} บาท${used ? `, วันนี้ใช้สิทธิ์ไปแล้ว ${fmt(used)} บาท` : ""})` : " (รัฐออก 60%)") + " · รายจ่ายนับเฉพาะที่เราจ่ายเอง";
+  }
 }
 $("fAmount").addEventListener("input", showTct);
+$("fDateText").addEventListener("input", showTct); $("fDate").addEventListener("change", showTct);
 function billTotals(pending){
   const gross = Math.round(bill.concat(pending ? [pending] : []).reduce((a, it) => a + it.amount, 0) * 100) / 100;
   const v = parseFloat($("billDisc").value) || 0;
@@ -2096,7 +2110,7 @@ function openBill(billId){
   setPick(pk.biz, bizOf(f)); fillNames(""); fillNotes("");
   setPick(pk.shop, f.shop || ""); fillPays(f.pay || ""); if (f.pay) $("fPay").value = f.pay; fillAcc(f.account || "");
   const keep = ["name", "biz", "note", "unitPrice", "qty", "unit", "itemDisc", "size", "sizeUnit"];
-  bill = items.map(x => { const it = {}; keep.forEach(k => { if (x[k] !== undefined && x[k] !== "") it[k] = x[k]; }); it.amount = Math.round(((Number(x.amount) || 0) / (f.pay === TCT ? TCT_OURS : 1) + (Number(x.disc) || 0)) * 100) / 100; return it; });
+  bill = items.map(x => { const it = {}; keep.forEach(k => { if (x[k] !== undefined && x[k] !== "") it[k] = x[k]; }); it.amount = Math.round(((isTct(x) ? tctFull(x) : Number(x.amount) || 0) + (Number(x.disc) || 0)) * 100) / 100; return it; });
   const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0);
   $("billDisc").value = disc ? Math.round(disc * 100) / 100 : ""; $("billDiscType").value = "baht";
   ["fAmount", "fUnit", "fQty", "fItemDisc", "fSize"].forEach(id => $(id).value = "");
@@ -2133,10 +2147,13 @@ $("billSave").addEventListener("click", async () => {
   const acc = pickVal(pk.acc); if (acc && shared.pay !== "เงินสด") shared.account = acc;
   // The discount is shared out over the items by price, so every total stays what was really paid.
   let left = disc;
+  const tct = shared.pay === TCT, govs = {};
+  let used = tct ? tctUsed(date, [...oldIds]) : 0;
   const out = bill.map((it, i) => {
     const share = i === bill.length - 1 ? Math.round(left * 100) / 100 : Math.round(disc * it.amount / gross * 100) / 100;
     left -= share;
-    const e = {...shared, ...it, id: oldIds.shift() || store.newId(), amount: Math.round((it.amount - share) * (shared.pay === TCT ? TCT_OURS : 1) * 100) / 100};
+    const e = {...shared, ...it, id: oldIds.shift() || store.newId(), amount: Math.round((it.amount - share) * 100) / 100};
+    if (tct){ const sp = tctSplit(e.amount, used); used = c2(used + sp.gov); govs[e.id] = sp.gov; e.amount = sp.ours; }
     if (share > 0) e.disc = share;
     return e;
   });
@@ -2144,6 +2161,7 @@ $("billSave").addEventListener("click", async () => {
   try {
     await store.save(out);
     rememberSizes(out);
+    if (tct) setGov(govs);
     if ($("fFollow").checked){ setFollow(out.map(x => x.id), true); $("fFollow").checked = false; }
     if (oldIds.length) await store.remove(oldIds);
     if (billEdit){ bill = []; billSlot = null; billEdit = null; $("dlg").close(); return; }
@@ -2300,6 +2318,9 @@ function initStore(){
     const sizes = mergeSizes(remote.itemSizes, ls.get(SIZES, {}), settings.itemSizes, s.itemSizes);
     const skip = [...new Set([...(remote.sizeSkip || []), ...(settings.sizeSkip || [])])];
     if (Object.keys(sizes).length){ s.itemSizes = sizes; if (cfg && JSON.stringify(sizes) !== JSON.stringify(remote.itemSizes || {})) enqueue({op: "setting", key: "itemSizes", value: sizes}); }
+    // the government share of each ไทยช่วยไทย entry: keep every entry's value from both copies
+    const gov = {...(settings.tctGov || {}), ...(remote.tctGov || {}), ...(keep.includes("tctGov") || (since && wrote.tctGov >= since) ? settings.tctGov : {})};
+    if (Object.keys(gov).length){ s.tctGov = gov; if (cfg && Object.keys(gov).length > Object.keys(remote.tctGov || {}).length) enqueue({op: "setting", key: "tctGov", value: gov}); }
     if (skip.length){ s.sizeSkip = skip; if (cfg && skip.length !== (remote.sizeSkip || []).length) enqueue({op: "setting", key: "sizeSkip", value: skip}); }
     writeSettings(s, true);
   };
