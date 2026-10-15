@@ -573,6 +573,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
+    <button class="btn sm" type="button" id="ppFromEntry" hidden>💳 ซื้อแบบ Pay Later / ผ่อน? สร้างตารางจ่ายของรายการนี้</button>
     <label class="check fu-check"><input type="checkbox" id="fFollow"> ⏰ เตือนที่หน้า Overall ให้กลับมาเช็ครายการนี้ (จำไม่ได้ว่าเป็นค่าอะไร ไว้เติมทีหลัง)</label>
     <div class="bill" id="billBox" hidden>
       <div class="bill-head"><strong id="billTitle">บิลนี้</strong><span class="hint" id="billInfo"></span></div>
@@ -1545,6 +1546,13 @@ function splitDues(total, n, first){
 }
 function editPlan(id, f){ savePlans(payPlans().map(p => p.id === id ? f(JSON.parse(JSON.stringify(p))) : p)); }
 let planOpen = null;
+let ppDraft = null, ppForm = null; // filled from an entry's edit form: open the new-schedule form with its name and amount
+$("ppFromEntry").addEventListener("click", () => {
+  const e = editing; if (!e) return;
+  ppDraft = {label: [e.note || e.name, e.shop].filter(Boolean).join(" · "), total: e.amount};
+  $("dlg").close(); go("overall");
+  setTimeout(() => { const f = document.querySelector("#oInst .pp-form"); if (f) f.scrollIntoView({block: "center"}); }, 50);
+});
 function renderPayPlans(box){
   const wrap = el("div", "pp"); box.append(wrap);
   payPlans().forEach(p => {
@@ -1590,6 +1598,7 @@ function renderPayPlans(box){
     if (!t || !first.value){ toast("ใส่ยอดรวมและวันจ่ายงวดแรก", true); return; }
     const id = "pp" + Date.now().toString(36);
     planOpen = id;
+    ppForm = null;
     savePlans([...payPlans(), {id, label: lab.value.trim() || "ผ่อน", account: acc.value.trim(), dues: splitDues(t, Number(n.value), first.value)}]);
   });
   const two = el("div", "two"); two.append(fld("ชื่อ", lab), fld("จ่ายกับ", acc));
@@ -1597,6 +1606,13 @@ function renderPayPlans(box){
   form.append(two, three, fld("จ่ายงวดแรกวันที่", first), dl,
     el("p", "hint", "ของที่ซื้อให้บันทึกเป็นรายจ่ายตามวันที่ซื้อเหมือนเดิม ตารางนี้ไว้เตือนว่าเดือนไหนต้องจ่ายเท่าไร ไม่นับเป็นรายจ่ายซ้ำ"), ok);
   add.addEventListener("click", () => { form.hidden = !form.hidden; if (!form.hidden) lab.focus(); });
+  if (ppDraft){ ppForm = {open: true, lab: ppDraft.label, tot: String(ppDraft.total)}; ppDraft = null; }
+  // the panel is redrawn whenever data syncs: keep what was typed and whether the form was open
+  const fields = {lab, acc, tot, n, first};
+  if (ppForm){ form.hidden = !ppForm.open; for (const k in fields) if (ppForm[k] != null) fields[k].value = ppForm[k]; }
+  const keepForm = () => { ppForm = {open: !form.hidden}; for (const k in fields) ppForm[k] = fields[k].value; };
+  Object.values(fields).forEach(f => f.addEventListener("input", keepForm)); n.addEventListener("change", keepForm);
+  add.addEventListener("click", keepForm);
   wrap.append(add, form);
 }
 // unpaid dues that are late or due within a week
@@ -2015,6 +2031,7 @@ function openForm(e){
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
   }
   sheetMode(e);
+  $("ppFromEntry").hidden = !(e && e.kind === "expense");
   bill = []; billSlot = null; $("billDisc").value = ""; showBillUI();
   updateInstHint();
 }
