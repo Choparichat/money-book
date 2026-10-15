@@ -74,7 +74,8 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .hist .op{font-size:.72rem;font-weight:600;border-radius:4px;padding:1px 6px;white-space:nowrap}
 .hist .op.add{background:var(--inc-soft);color:var(--inc)}.hist .op.edit{background:var(--sav-soft);color:var(--sav)}.hist .op.del{background:var(--exp-soft);color:var(--exp)}
 .hist .w{grid-column:2 / -1;font-size:.76rem;color:var(--muted)}
-.hist .gone{opacity:.6;cursor:default}
+.hist .gone{cursor:default}.hist .gone > span,.hist .gone > .w{opacity:.6}
+.hist .h > .btn{grid-column:3;justify-self:end}
 .panel.alert{border:2px solid var(--exp);background:color-mix(in srgb,var(--exp) 10%,var(--surface))}
 .panel.alert h2{color:var(--exp)}
 .sa{display:grid;gap:10px}
@@ -951,12 +952,20 @@ function renderHistory(){
   const OP = {add: "เพิ่ม", edit: "แก้", del: "ลบ"};
   const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? "เมื่อกี้" : m < 60 ? `${m} นาทีก่อน` : m < 1440 ? `${Math.round(m / 60)} ชม.ก่อน` : thaiDate(t.slice(0, 10)); };
   for (const h of log.slice(0, histLimit)){
-    const cur = allEntries.find(x => x.id === h.e.id), e = cur || h.e, gone = !cur;
+    // an app entry can live on as the same row typed in the sheet's year tab (other id, same day/amount/name)
+    const same = x => x.kind === h.e.kind && x.date === h.e.date && Math.abs((Number(x.amount) || 0) - (Number(h.e.amount) || 0)) < 0.005 && (x.name || "") === (h.e.name || "") && (x.note || "") === (h.e.note || "");
+    const cur = allEntries.find(x => x.id === h.e.id) || (h.op !== "del" ? allEntries.find(same) : null), e = cur || h.e, gone = !cur;
     const r = el("div", "h" + (gone ? " gone" : ""));
     const title = e.kind === "saving" ? `${e.name}${e.group ? " · " + e.group : ""}` : (e.note ? `${e.note}` : e.name) || "—";
     r.append(el("span", "op " + h.op, OP[h.op] || h.op), el("span", "", title), el("span", `num ${e.kind}`, fmt(e.amount)));
     r.append(el("div", "w", `${ago(h.t)} · ${KIND_LABEL[e.kind] || ""} ${e.kind !== "saving" && e.note ? e.name + " · " : ""}วันที่ ${thaiDate(e.date)}${e.biz && e.biz !== PERSONAL ? " · " + e.biz : ""}${e.billId ? " · ในบิล" : ""}${gone ? (h.op === "del" ? "" : " · ถูกลบไปแล้ว") : ""}`));
     if (!gone){ r.tabIndex = 0; r.title = "แตะเพื่อเปิดรายการนี้"; const o = () => openForm(cur); r.addEventListener("click", o); r.addEventListener("keydown", ev => { if (ev.key === "Enter") o(); }); }
+    else if (h.e.kind && h.e.date && isFinite(Number(h.e.amount))){
+      // put it back exactly as it was saved
+      const back = el("button", "btn sm", "กู้คืน"); back.type = "button"; back.title = "เอารายการนี้กลับมา";
+      back.addEventListener("click", ev => { ev.stopPropagation(); store.save([{...h.e, updatedAt: new Date().toISOString()}]); });
+      r.append(back);
+    }
     box.append(r);
   }
   if (log.length > histLimit){ const b = el("button", "btn sm more", `ดูทั้งหมด (อีก ${log.length - histLimit})`); b.type = "button"; b.addEventListener("click", () => { histLimit = log.length; renderHistory(); }); box.append(b); }
@@ -2272,6 +2281,8 @@ function initStore(){
   // and so do settings changed while a read from the sheet was on its way (its copy is older).
   const pendingSettings = () => ls.get(Q, []).filter(o => o.op === "setting").map(o => o.key);
   const wrote = {};
+  // when this device last added, changed or deleted each entry
+  const touched = {}, touch = ids => { const t = Date.now(); ids.forEach(id => { touched[id] = t; }); };
   const mergeSettings = (remote, since) => {
     if (!remote) return;
     const keep = pendingSettings(), s = {...remote};
@@ -2344,7 +2355,19 @@ function initStore(){
     await flush();
     if (ls.get(Q, []).length || busy) return;
     const since = Date.now();
-    try { const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings, since); write(j.entries); idle(); }
+    try {
+      const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings, since);
+      // The sheet's list was read before anything this device saved or deleted while it was on its way:
+      // keep those changes instead of letting the older list drop them.
+      let list = j.entries;
+      const late = Object.entries(touched).filter(([, t]) => t >= since).map(([id]) => id);
+      if (late.length){
+        const mine = new Map(read().map(e => [e.id, e])), gone = new Set(late.filter(id => !mine.has(id)));
+        list = list.filter(e => !gone.has(e.id));
+        for (const id of late) if (mine.has(id)){ const i = list.findIndex(e => e.id === id); if (i >= 0) list[i] = mine.get(id); else list.push(mine.get(id)); }
+      }
+      write(list); idle();
+    }
     catch (err){ status(`โหลดจาก Google Sheet ไม่ได้: ${err.message} (ใช้ข้อมูลในเครื่องไปก่อน)`, true); }
   }
 
@@ -2355,7 +2378,7 @@ function initStore(){
   }
   // What was saved on this device, newest first, so a save that seems lost can be found again.
   const LOG = "money-book-log";
-  const snap = e => ({id: e.id, kind: e.kind, date: e.date, name: e.name || "", note: e.note || "", group: e.group || "", amount: e.amount, biz: e.biz || "", billId: e.billId || "", ...(e.size > 0 ? {size: e.size, sizeUnit: e.sizeUnit || "ml"} : {})});
+  const snap = e => { const o = {...e}; ["src", "tab", "row"].forEach(k => delete o[k]); return o; };
   function logOps(op, list){
     if (!list.length) return;
     const t = new Date().toISOString();
@@ -2365,13 +2388,13 @@ function initStore(){
     kind: "local",
     log(){ return ls.get(LOG, []); },
     subscribe(fn){ subs.push(fn); fn(read()); },
-    async save(list){ const l = read(); const had = new Set(l.map(x => x.id)); logOps(e => had.has(e.id) ? "edit" : "add", list); for (const e of list){ const i = l.findIndex(x => x.id === e.id); if (i >= 0) l[i] = e; else l.push(e); } write(l); enqueue(...list.map(e => ({op:"put", entry:e}))); },
-    async remove(ids){ const s = new Set(ids); logOps("del", read().filter(e => s.has(e.id))); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
+    async save(list){ touch(list.map(e => e.id)); const l = read(); const had = new Set(l.map(x => x.id)); logOps(e => had.has(e.id) ? "edit" : "add", list); for (const e of list){ const i = l.findIndex(x => x.id === e.id); if (i >= 0) l[i] = e; else l.push(e); } write(l); enqueue(...list.map(e => ({op:"put", entry:e}))); },
+    async remove(ids){ touch(ids); const s = new Set(ids); logOps("del", read().filter(e => s.has(e.id))); write(read().filter(e => !s.has(e.id))); enqueue(...ids.map(id => ({op:"del", id}))); },
     setSetting(key, value){ wrote[key] = Date.now(); writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
     status(){ idle(); },
     // Change or clear a row the user typed in a year tab of the sheet.
-    async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
-    async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
+    async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); touch([orig.id]); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
+    async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); touch([orig.id]); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
