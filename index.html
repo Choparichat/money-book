@@ -103,6 +103,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .pp-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) minmax(0,7.5rem);gap:8px;align-items:center;padding-top:6px}.pp-row input[type=checkbox]{width:20px;height:20px}
 .pp-row input[type=date],.pp-row input[type=number]{min-width:0;width:100%}.pp-row.late input[type=date]{color:var(--exp)}.pp-form{display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px}.pp>.btn.sm{justify-self:start}
 .pl-alert-items{grid-column:1/-1;display:grid;padding-left:8px}.pl-alert-items .pl-item{font-size:.92rem}
+.pl-pay{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}.pl-pay input{width:9rem}.pl-pay .hint{flex-basis:100%}
 .pl-row{display:grid;gap:8px}.pl-grp{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px}.pl-grp summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pl-grp summary .n{margin-left:auto;font-weight:600}.pl-item{all:unset;cursor:pointer;display:grid;width:100%;box-sizing:border-box;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:6px 0;border-top:1px solid var(--line)}.pl-item:focus-visible{outline:2px solid var(--fg);border-radius:6px}
 .pl-paid{display:flex;gap:8px;align-items:center;margin-top:6px}.pl-paid input{width:20px;height:20px}
@@ -1630,6 +1631,43 @@ function renderPayPlans(box){
 // details because a row typed in the sheet gets a new id once its contents change.
 const plTags = () => settings.payLater || {};
 const plPaid = () => settings.payLaterPaid || {};
+const plPaidAmt = (g, v) => v && typeof v === "object" && v.amt != null ? Number(v.amt) : g.total;
+// Ask what was really paid for a bill. TikTok takes off interest when a bill is paid early, so the
+// difference goes in as one expense line on the due date, in the category of the bill's biggest item.
+let plPaying = null; // {due, v}: a pay form left open survives the panel being redrawn by a sync
+function plPayForm(g, host, done, where = "list"){
+  if (host.querySelector(".pl-pay")) return;
+  if (!plPaying || plPaying.due !== g.due || plPaying.where !== where) plPaying = {due: g.due, v: String(g.total), where};
+  const f = el("div", "pl-pay"), inp = el("input"); inp.type = "number"; inp.step = "0.01"; inp.inputMode = "decimal"; inp.value = plPaying.v;
+  const ok = el("button", "btn sm primary", "บันทึก"), no = el("button", "btn sm", "ยกเลิก"); ok.type = no.type = "button";
+  const hint = el("span", "hint");
+  const show = () => { const diff = c2((parseFloat(inp.value) || 0) - g.total); hint.textContent = diff ? `ต่างจากยอดบิล ${diff > 0 ? "+" : ""}${fmt(diff)} บาท แอปจะลงส่วนต่างเป็นรายการปรับยอดให้` : "ตรงกับยอดบิล"; };
+  inp.addEventListener("input", () => { plPaying.v = inp.value; show(); }); show();
+  no.addEventListener("click", () => { plPaying = null; f.remove(); done && done(false); });
+  ok.addEventListener("click", async () => {
+    const amt = c2(parseFloat(inp.value)); if (!isFinite(amt) || amt <= 0){ toast("ใส่ยอดที่จ่ายจริง", true); return; }
+    const diff = c2(amt - g.total), rec = {amt};
+    ok.disabled = true;
+    try {
+      if (diff){
+        const big = [...g.items].sort((a, b) => b.amount - a.amount)[0];
+        const adj = {id: store.newId(), kind: "expense", date: g.due, ym: ymOf(g.due), name: big.name, amount: diff, biz: big.biz, pay: "ผ่อนจ่าย", account: "TikTok Later",
+          note: diff < 0 ? "ส่วนลดดอกเบี้ย TikTok Pay Later" : "ส่วนต่าง TikTok Pay Later", updatedAt: new Date().toISOString()};
+        if (!adj.biz) delete adj.biz;
+        await store.save([adj]); rec.adj = adj.id;
+      }
+      plPaying = null;
+      store.setSetting("payLaterPaid", {...plPaid(), [g.due]: rec});
+      toast(diff ? `บันทึกว่าจ่าย ${fmt(amt)} บาท และลงส่วนต่าง ${fmt(diff)} บาทแล้ว` : `บันทึกว่าจ่าย ${fmt(amt)} บาทแล้ว`);
+    } catch (err){ ok.disabled = false; toast(err.message, true); }
+  });
+  f.append(el("label", "", "จ่ายจริงเท่าไร (บาท)"), inp, ok, no, hint); host.append(f); inp.focus(); inp.select();
+}
+async function plUnpay(due){
+  const m = {...plPaid()}, v = m[due]; delete m[due];
+  if (v && v.adj) try { await store.remove([v.adj]); } catch {}
+  store.setSetting("payLaterPaid", m);
+}
 const plDefaultDue = date => addMonths(date.slice(0, 7), 1) + "-10";
 const plSnap = e => ({date: e.date, amount: Number(e.amount) || 0, name: e.name || "", note: e.note || ""});
 const plSame = (a, b) => a.date === b.date && Number(a.amount) === Number(b.amount) && (a.name || "") === (b.name || "") && (a.note || "") === (b.note || "");
@@ -1656,7 +1694,7 @@ function renderPayLater(){
   const box = $("oPL"), groups = plGroups(), paid = plPaid();
   $("plPanel").hidden = !groups.length; box.textContent = ""; if (!groups.length) return;
   const owe = c2(groups.filter(g => !paid[g.due]).reduce((a, g) => a + g.total, 0));
-  const done = c2(groups.filter(g => paid[g.due]).reduce((a, g) => a + g.total, 0));
+  const done = c2(groups.filter(g => paid[g.due]).reduce((a, g) => a + plPaidAmt(g, paid[g.due]), 0));
   box.append(el("p", "hint", `ยังต้องจ่าย ${fmt(owe)} บาท · จ่ายไปแล้วทั้งหมด ${fmt(done)} บาท`));
   groups.forEach(g => {
     const d = el("details", "pl-grp"), isPaid = !!paid[g.due]; d.open = !isPaid && g === groups.find(x => !paid[x.due]);
@@ -1669,8 +1707,10 @@ function renderPayLater(){
       b.addEventListener("click", () => openForm(e)); d.append(b);
     });
     const lab = el("label", "pl-paid"), ck = el("input"); ck.type = "checkbox"; ck.checked = isPaid;
-    ck.addEventListener("change", () => { const m = {...plPaid()}; if (ck.checked) m[g.due] = true; else delete m[g.due]; store.setSetting("payLaterPaid", m); });
-    lab.append(ck, document.createTextNode(` จ่ายบิลรอบนี้ ${fmt(g.total)} บาทแล้ว`)); d.append(lab);
+    ck.addEventListener("change", () => { if (ck.checked) plPayForm(g, d, ok => { if (!ok) ck.checked = false; }); else { d.querySelector(".pl-pay")?.remove(); plUnpay(g.due); } });
+    if (!isPaid && plPaying?.due === g.due && plPaying.where === "list"){ ck.checked = true; d.open = true; setTimeout(() => plPayForm(g, d, ok => { if (!ok) ck.checked = false; })); }
+    const pa = plPaidAmt(g, paid[g.due]);
+    lab.append(ck, document.createTextNode(isPaid && pa !== g.total ? ` จ่ายบิลรอบนี้แล้ว ${fmt(pa)} บาท (บิล ${fmt(g.total)} ส่วนต่าง ${fmt(c2(pa - g.total))})` : ` จ่ายบิลรอบนี้ ${fmt(g.total)} บาทแล้ว`)); d.append(lab);
     box.append(d);
   });
 }
@@ -1687,7 +1727,8 @@ function renderPayAlert(){
     const o = el("div", "fu-open");
     o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${d.pl.items.length} รายการ` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
     const ok = el("button", "btn sm", "จ่ายแล้ว"); ok.type = "button";
-    ok.addEventListener("click", () => d.pl ? store.setSetting("payLaterPaid", {...plPaid(), [d.date]: true}) : editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
+    ok.addEventListener("click", () => d.pl ? plPayForm(d.pl, row, null, "alert") : editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
+    if (d.pl && plPaying?.due === d.date && plPaying.where === "alert") setTimeout(() => plPayForm(d.pl, row, null, "alert"));
     row.append(o, ok);
     if (d.pl){
       const items = el("div", "pl-alert-items");
