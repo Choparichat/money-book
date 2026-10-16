@@ -112,6 +112,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .yc-tl{display:flex;align-items:center;gap:6px;margin-top:2px}.yc-tl b{margin-left:auto;font-variant-numeric:tabular-nums}
 .pl-alert-items{grid-column:1/-1;display:grid;padding-left:8px}.pl-alert-items .pl-item{font-size:.92rem}
 .pl-pay{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}.pl-pay input{width:9rem}.pl-pay .hint{flex-basis:100%}
+.pl-twins{width:100%;margin:6px 0;white-space:normal;text-align:left}
 .tag.pl{background:var(--sav-soft);color:var(--sav);font-weight:500}
 .pl-row{display:grid;gap:8px}.pl-grp{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px}.pl-grp summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .pl-grp summary .n{margin-left:auto;font-weight:600}.pl-item{all:unset;cursor:pointer;display:grid;width:100%;box-sizing:border-box;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:6px 0;border-top:1px solid var(--line)}.pl-item:focus-visible{outline:2px solid var(--fg);border-radius:6px}
@@ -2024,6 +2025,14 @@ function renderPayLater(){
       b.addEventListener("click", () => openForm(e)); d.append(b);
     });
     (g.inst || []).forEach(x => d.append(plInstRow(x)));
+    // the same thing bought more than once (same day, name, price) where only one copy is ticked: offer to add the rest
+    const tagged = plIndex(), twins = isPaid ? [] : allEntries.filter(e => e.kind === "expense" && !tagged.has(e) && g.items.some(x => plSame(x, e)));
+    if (twins.length){
+      const tb = el("button", "btn ghost pl-twins", `＋ พบรายการซ้ำที่ยังไม่ได้ติ๊ก ${twins.length} รายการ (${fmt(c2(twins.reduce((a, e) => a + (Number(e.amount) || 0), 0)))} บาท) กดเพื่อรวมเข้าบิลนี้`);
+      tb.type = "button"; tb.title = twins.map(e => `${thaiDate(e.date)} · ${e.note || e.name} · ${fmt(e.amount)}`).join("\n");
+      tb.addEventListener("click", () => { tb.disabled = true; setPL(twins.map(e => ({e})), true, g.due); });
+      d.append(tb);
+    }
     const lab = el("label", "pl-paid"), ck = el("input"); ck.type = "checkbox"; ck.checked = isPaid;
     ck.addEventListener("change", () => { if (ck.checked) plPayForm(g, d, ok => { if (!ok) ck.checked = false; }); else { d.querySelector(".pl-pay")?.remove(); plUnpay(g.due); } });
     if (!isPaid && plPaying?.due === g.due && plPaying.where === "list"){ ck.checked = true; d.open = true; setTimeout(() => plPayForm(g, d, ok => { if (!ok) ck.checked = false; })); }
