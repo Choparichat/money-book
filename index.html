@@ -518,6 +518,11 @@ details summary{cursor:pointer;font-weight:500}
       <div id="checkApps" class="ca"></div>
     </div>
     <div class="panel">
+      <h2>รายละเอียดที่ล็อกหมวดไว้</h2>
+      <p class="hint" style="margin:0">เลือกหรือพิมพ์รายละเอียดเหล่านี้ตอนบันทึกรายจ่าย แอปจะเปลี่ยนหมวดให้เอง</p>
+      <div id="noteCatList" class="ca"></div>
+    </div>
+    <div class="panel">
       <h2>สีของหมวด</h2>
       <p class="hint" style="margin:0">แตะวงสีเพื่อเปลี่ยน สีนี้ใช้ทั้งแถบหน้ารายการและกราฟวงกลม ถ้าเชื่อมชีตไว้ สีจะซิงก์ไปทุกเครื่อง</p>
       <div id="catColors" class="cc"></div>
@@ -1002,7 +1007,7 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); renderAccounts(); }})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); renderAccounts(); renderNoteCats(); }})[page](P);
   fillLists();
 }
 let histLimit = 5;
@@ -1070,6 +1075,44 @@ function renderAccounts(){
   const go2 = () => { const v = inp.value.trim(); if (!v || list.includes(v)) { inp.focus(); return; } put([...list, v]); };
   ok.addEventListener("click", go2); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go2(); } });
   add.append(inp, ok); box.append(add);
+}
+let ncArm = null;
+function renderNoteCats(){
+  const box = $("noteCatList"); if (!box) return;
+  box.textContent = "";
+  const m = noteCats(), put = x => store.setSetting("noteCats", x);
+  for (const [n, c] of Object.entries(m)){
+    const row = el("div", "ca-row");
+    const other = entries.filter(e => e.kind === "expense" && (e.note || "").trim() === n && e.name !== c);
+    const del = el("button", "btn sm", "ลบ"); del.type = "button";
+    del.addEventListener("click", () => { const x = {...m}; delete x[n]; put(x); });
+    row.append(el("span", "", `${n} → ${c}`), del);
+    box.append(row);
+    if (other.length){
+      // the confirm state lives outside the button: a sync can redraw this panel between the two taps
+      const armed = ncArm === n;
+      const mv = el("button", "btn sm" + (armed ? " danger" : ""), armed ? `กดอีกครั้งเพื่อยืนยันย้าย ${other.length} รายการ` : `ย้ายรายการเก่า ${other.length} รายการ ไปหมวด ${c}`); mv.type = "button";
+      mv.addEventListener("click", async () => {
+        if (ncArm !== n){ ncArm = n; renderNoteCats(); setTimeout(() => { if (ncArm === n){ ncArm = null; renderNoteCats(); } }, 5000); return; }
+        ncArm = null;
+        mv.disabled = true;
+        try {
+          const app = other.filter(e => e.src !== "sheet").map(e => ({...e, name: c, updatedAt: new Date().toISOString()}));
+          if (app.length) await store.save(app);
+          for (const e of other.filter(e => e.src === "sheet")) await store.sheetEdit(e, {...e, name: c});
+          toast(`ย้าย ${other.length} รายการไปหมวด ${c} แล้ว`);
+        } catch (err){ mv.disabled = false; toast(err.message, true); }
+      });
+      const w = el("div", "hint", `มี "${n}" อยู่ในหมวดอื่น ${other.length} รายการ: `); w.append(mv); box.append(w);
+    }
+  }
+  const add = el("div", "ca-add"), ni = el("input"), cs = el("select"), ok = el("button", "btn sm primary", "＋ เพิ่ม");
+  ni.placeholder = "รายละเอียด เช่น เม็ดฟู่"; ni.setAttribute("aria-label", "รายละเอียด");
+  const cats = withAll(freq(entries.filter(e => e.kind === "expense"), e => e.name), DEF.cats.expense);
+  cats.forEach(c => cs.append(opt(c, c))); cs.setAttribute("aria-label", "หมวด");
+  ok.type = "button";
+  ok.addEventListener("click", () => { const v = ni.value.trim(); if (!v){ ni.focus(); return; } put({...m, [v]: cs.value}); });
+  add.append(ni, cs, ok); box.append(add);
 }
 function renderCatColors(){
   const box = $("catColors"); if (!box) return;
@@ -2271,7 +2314,17 @@ document.querySelectorAll("#kindSeg button").forEach(b => b.addEventListener("cl
 // A new owner or category refreshes the lists but keeps the detail already typed.
 onPick(pk.biz, () => { const n = pickVal(pk.note); fillNames(""); fillNotes(n); });
 onPick(pk.name, () => { if (pickVal(pk.name) === "Muan" && kind !== "saving") setPick(pk.biz, "Muan"); fillNotes(pickVal(pk.note)); });
+// Details that always belong to one category (เม็ดฟู่ is always ค่ายา): picking the detail sets the category.
+const DEF_NOTE_CATS = {"เม็ดฟู่": "ค่ายา"};
+const noteCats = () => settings.noteCats || DEF_NOTE_CATS;
+function applyNoteCat(){
+  if (kind !== "expense") return;
+  const n = pickVal(pk.note), c = n && noteCats()[n];
+  if (!c || pickVal(pk.name) === c) return;
+  setPick(pk.name, c); fillNotes(n);
+}
 onPick(pk.note, () => {
+  applyNoteCat();
   // Same item as before: start from the last unit, shop and price paid.
   const n = pickVal(pk.note);
   if (kind !== "expense" || !n || editing) return;
@@ -2410,7 +2463,7 @@ $("delAllBtn").addEventListener("click", async () => {
 
 const commitCombos = () => Object.values(pk).forEach(p => p.commit && p.commit());
 $("entryForm").addEventListener("submit", async ev => {
-  ev.preventDefault(); commitCombos();
+  ev.preventDefault(); commitCombos(); applyNoteCat();
   const amount = Math.round(parseFloat($("fAmount").value) * 100) / 100;
   const date = $("fDate").value, name = pickVal(pk.name);
   if (!date || !isFinite(amount) || !name){ toast("กรอกวันที่ หมวด และจำนวนเงินให้ครบ", true); return; }
@@ -2584,7 +2637,7 @@ function openBill(billId){
   $("billBox").scrollIntoView({block: "nearest"});
 }
 $("billAdd").addEventListener("click", () => {
-  commitCombos();
+  commitCombos(); applyNoteCat();
   const it = itemFromForm();
   if (!it){ toast("เลือกหมวดและใส่จำนวนเงินของสินค้าชิ้นนี้ก่อน", true); return; }
   putInBill(it);
