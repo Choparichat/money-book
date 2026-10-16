@@ -2653,7 +2653,9 @@ $("entryForm").addEventListener("submit", async ev => {
       upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
       SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
     }
-    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    const same = (a, b) => String(a ?? "") === String(b ?? ""), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note", "unitPrice", "qty"];
+    const touched = Number(upd.amount) !== Number(editing.amount) || sheetCols.some(k => !same(upd[k], editing[k]));
+    try { await (touched ? store.sheetEdit(editing, upd) : store.sheetLocal(editing, upd)); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -3083,6 +3085,11 @@ function initStore(){
   const keyOf = e => [e.kind, e.date, Math.round((Number(e.amount)||0)*100), String(e.name||"").trim(), String(e.note||"").trim()].join("|");
   async function flush(){
     if (!cfg || busy) return;
+    // drop sheet-row edits that change none of the sheet's own columns (only app-kept details changed)
+    const same = (a, b) => String(a ?? "") === String(b ?? "");
+    const noop = o => o.op === "sheetEdit" && o.kind !== "saving" && o.entry && o.orig && same(o.entry.date, o.orig.date) && Number(o.entry.amount) === Number(o.orig.amount)
+      && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && same(o.entry.unitPrice, o.orig.unitPrice) && same(o.entry.qty, o.orig.qty);
+    if (ls.get(Q, []).some(noop)) ls.set(Q, ls.get(Q, []).filter(o => !noop(o)));
     const q = ls.get(Q, []);
     if (!q.length){ idle(); return; }
     busy = true;
@@ -3107,7 +3114,7 @@ function initStore(){
         if (bad.length < q.length){ ok = true; setTimeout(() => pull(), 0); }
       } else bad = [[q[0], err.message]];
       const [o, m] = bad[0] || [q[0], err.message];
-      if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${opName(o)}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ`, true);
+      if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ`, true);
     }
     finally { busy = false; }
     if (ok){ if (!ls.get(Q, []).length) idle(); else if (clean) flush(); }
@@ -3139,7 +3146,7 @@ function initStore(){
   function sheetOp(orig, op){
     if (!cfg) throw new Error("ต้องเชื่อม Google Sheet ก่อน ถึงจะแก้รายการจากชีตได้");
     if ((ls.get("money-book-script", 0)) < 4 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
-    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || "", note: orig.note || ""}});
+    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || "", note: orig.note || "", unitPrice: orig.unitPrice || "", qty: orig.qty || ""}});
   }
   // What was saved on this device, newest first, so a save that seems lost can be found again.
   const LOG = "money-book-log";
@@ -3158,6 +3165,8 @@ function initStore(){
     setSetting(key, value){ wrote[key] = Date.now(); writeSettings({...settings, [key]: value}); enqueue({op:"setting", key, value}); },
     status(){ idle(); },
     // Change or clear a row the user typed in a year tab of the sheet.
+    // only app-kept details changed (payment, shop...): nothing to write to the sheet row
+    async sheetLocal(orig, upd){ const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
     async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); touch([orig.id]); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
     async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); touch([orig.id]); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
