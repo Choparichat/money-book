@@ -1929,7 +1929,7 @@ function plPayForm(g, host, done, where = "list"){
     ok.disabled = true;
     try {
       if (diff){
-        const big = [...g.items].sort((a, b) => b.amount - a.amount)[0];
+        const big = [...g.items].sort((a, b) => b.amount - a.amount)[0] || {name: "อื่นๆ"};
         const adj = {id: store.newId(), kind: "expense", date: g.due, ym: ymOf(g.due), name: big.name, amount: diff, biz: big.biz, pay: "ผ่อนจ่าย", account: "TikTok Later",
           note: diff < 0 ? "ส่วนลดดอกเบี้ย TikTok Pay Later" : "ส่วนต่าง TikTok Pay Later", updatedAt: new Date().toISOString()};
         if (!adj.biz) delete adj.biz;
@@ -1937,6 +1937,7 @@ function plPayForm(g, host, done, where = "list"){
       }
       plPaying = null;
       store.setSetting("payLaterPaid", {...plPaid(), [g.due]: rec});
+      plInstPaid(g, true);
       toast(diff ? `บันทึกว่าจ่าย ${fmt(amt)} บาท และลงส่วนต่าง ${fmt(diff)} บาทแล้ว` : `บันทึกว่าจ่าย ${fmt(amt)} บาทแล้ว`);
     } catch (err){ ok.disabled = false; toast(err.message, true); }
   });
@@ -1944,6 +1945,7 @@ function plPayForm(g, host, done, where = "list"){
 }
 async function plUnpay(due){
   const m = {...plPaid()}, v = m[due]; delete m[due];
+  plInstPaid(plGroups().find(g => g.due === due), false);
   if (v && v.adj) try { await store.remove([v.adj]); } catch {}
   store.setSetting("payLaterPaid", m);
 }
@@ -1967,8 +1969,22 @@ function plGroups(){
     const v = g.get(t.due) || {due: t.due, items: [], total: 0};
     v.items.push(e); v.total = c2(v.total + (Number(e.amount) || 0)); g.set(t.due, v);
   }
+  // TikTok bills one statement a month: an installment of a TikTok schedule due that month is part of that bill
+  for (const d of planDues()){
+    if (!/tiktok/i.test(d.plan.account || "")) continue;
+    const v = [...g.values()].find(x => x.due.slice(0, 7) === d.date.slice(0, 7)); if (!v) continue;
+    (v.inst = v.inst || []).push(d); v.total = c2(v.total + d.amount);
+  }
   return [...g.values()].sort((a, b) => a.due < b.due ? -1 : 1);
 }
+const plMerged = () => new Set(plGroups().flatMap(g => (g.inst || []).map(d => d.plan.id + ":" + d.i)));
+// mark the installments inside a bill paid or not, together with the bill
+function plInstPaid(g, on){
+  if (!g || !g.inst || !g.inst.length) return;
+  const keys = new Set(g.inst.map(d => d.plan.id + ":" + d.i));
+  savePlans(payPlans().map(p => ({...p, dues: (p.dues || []).map((x, i) => keys.has(p.id + ":" + i) ? {...x, paid: on} : x)})));
+}
+const plInstRow = d => { const b = el("div", "pl-item"); b.append(el("span", "", `${thaiDate(d.date)} · ผ่อน ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`), el("span", "", fmt(d.amount))); return b; };
 function renderPayLater(){
   const box = $("oPL"), groups = plGroups(), paid = plPaid();
   $("plPanel").hidden = !groups.length; box.textContent = ""; if (!groups.length) return;
@@ -1978,13 +1994,14 @@ function renderPayLater(){
   groups.forEach(g => {
     const d = el("details", "pl-grp"), isPaid = !!paid[g.due]; d.open = !isPaid && g === groups.find(x => !paid[x.due]);
     const sm = el("summary");
-    sm.append(el("strong", !isPaid && g.due < todayISO ? "neg" : "", `${isPaid ? "✓ " : ""}ครบ ${thaiDate(g.due)}`), el("span", "hint", `${g.items.length} รายการ`), el("span", "n", fmt(g.total)));
+    sm.append(el("strong", !isPaid && g.due < todayISO ? "neg" : "", `${isPaid ? "✓ " : ""}ครบ ${thaiDate(g.due)}`), el("span", "hint", `${g.items.length} รายการ${g.inst ? ` + ผ่อน ${g.inst.length} งวด` : ""}`), el("span", "n", fmt(g.total)));
     d.append(sm);
     g.items.sort((a, b) => a.date < b.date ? -1 : 1).forEach(e => {
       const b = el("button", "pl-item"); b.type = "button";
       b.append(el("span", "", `${thaiDate(e.date)} · ${e.note || e.name}`), el("span", "", fmt(e.amount)));
       b.addEventListener("click", () => openForm(e)); d.append(b);
     });
+    (g.inst || []).forEach(x => d.append(plInstRow(x)));
     const lab = el("label", "pl-paid"), ck = el("input"); ck.type = "checkbox"; ck.checked = isPaid;
     ck.addEventListener("change", () => { if (ck.checked) plPayForm(g, d, ok => { if (!ok) ck.checked = false; }); else { d.querySelector(".pl-pay")?.remove(); plUnpay(g.due); } });
     if (!isPaid && plPaying?.due === g.due && plPaying.where === "list"){ ck.checked = true; d.open = true; setTimeout(() => plPayForm(g, d, ok => { if (!ok) ck.checked = false; })); }
@@ -1997,14 +2014,15 @@ function renderPayLater(){
 function renderPayAlert(){
   const box = $("payAlert"), soon = addDays(todayISO, 7);
   const pl = plGroups().filter(g => !plPaid()[g.due] && g.due <= soon).map(g => ({date: g.due, amount: g.total, pl: g}));
-  const list = [...planDues().filter(d => !d.paid && d.date <= soon), ...pl].sort((a, b) => a.date < b.date ? -1 : 1);
+  const merged = plMerged();
+  const list = [...planDues().filter(d => !d.paid && d.date <= soon && !merged.has(d.plan.id + ":" + d.i)), ...pl].sort((a, b) => a.date < b.date ? -1 : 1);
   box.hidden = !list.length; if (!list.length) return;
   $("payAlertTitle").textContent = `💳 ถึงกำหนดจ่าย ${list.length} งวด`;
   const ul = $("payAlertList"); ul.textContent = "";
   list.forEach(d => {
     const row = el("div", "fu-row"), late = d.date < todayISO;
     const o = el("div", "fu-open");
-    o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${d.pl.items.length} รายการ` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
+    o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${d.pl.items.length} รายการ${d.pl.inst ? ` + ผ่อน ${d.pl.inst.length} งวด` : ""}` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
     const ok = el("button", "btn sm", "จ่ายแล้ว"); ok.type = "button";
     ok.addEventListener("click", () => d.pl ? plPayForm(d.pl, row, null, "alert") : editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
     if (d.pl && plPaying?.due === d.date && plPaying.where === "alert") setTimeout(() => plPayForm(d.pl, row, null, "alert"));
@@ -2016,6 +2034,7 @@ function renderPayAlert(){
         b.append(el("span", "", `${thaiDate(e.date)} · ${e.note || e.name}${e.note && e.name ? " (" + e.name + ")" : ""}`), el("span", "", fmt(e.amount)));
         b.addEventListener("click", () => openForm(e)); items.append(b);
       });
+      (d.pl.inst || []).forEach(x => items.append(plInstRow(x)));
       row.append(items);
     }
     ul.append(row);
