@@ -343,6 +343,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="oPieExp"></div></div>
       <div class="panel"><h2>เงินที่ได้รับไปอยู่ไหน</h2><div id="oPieFlow"></div></div>
     </div>
+    <div class="panel"><h2>บัญชีของฉัน</h2><div id="oAcc"></div></div>
     <div class="panel" id="plPanel" hidden><h2>💳 TikTok Pay Later</h2><div id="oPL"></div></div>
     <div class="grid2">
       <div class="panel"><div class="panel-head"><h2>เป้าหมายการออม</h2><button class="btn sm" type="button" data-go="saving">จัดการ</button></div><div id="oFunds"></div></div>
@@ -496,6 +497,11 @@ details summary{cursor:pointer;font-weight:500}
       <div class="toast" id="syncMsg" role="status"></div>
     </div>
     <div class="panel">
+      <h2>บัญชีของฉัน</h2>
+      <p class="hint" style="margin:0">รายชื่อบัญชีที่ให้เลือกตอนบันทึก (ช่อง เข้าบัญชี / จากบัญชี) และตอนโอนระหว่างบัญชี</p>
+      <div id="accEdit" class="ca"></div>
+    </div>
+    <div class="panel">
       <h2>แอปที่ใช้เช็คในปฏิทิน</h2>
       <p class="hint" style="margin:0">แตะวันที่ในปฏิทินรายรับ/รายจ่าย จะมีปุ่มติ๊กตามรายชื่อนี้ ครบทุกแอปถึงขึ้นกากบาท วันที่เช็คครบไปแล้วยังนับว่าครบ แม้เพิ่มแอปใหม่</p>
       <div id="checkApps" class="ca"></div>
@@ -608,7 +614,7 @@ details summary{cursor:pointer;font-weight:500}
 (() => {
 const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 const TH_ABBR = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
-const KIND_LABEL = {income:"รายรับ", expense:"รายจ่าย", saving:"ลงทุน/ออม"};
+const KIND_LABEL = {income:"รายรับ", expense:"รายจ่าย", saving:"ลงทุน/ออม", transfer:"โอนระหว่างบัญชี"};
 const PERSONAL = "ส่วนตัว";
 const NEW = "__new__";
 const DEF = {
@@ -693,6 +699,8 @@ const signedSaving = e => (e.side === "ขาย" ? -1 : 1) * (Number(e.amount)|
 // so it never counts in my income, spending or investment totals.
 const PARTNER = "แฟน";
 let entries = [], partner = [], allEntries = [];
+// money moved between my own accounts: never income or expense, kept apart from every total
+let transfers = [];
 let settings = {};
 let store = null;
 let page = "overall";
@@ -967,7 +975,7 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); }})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); renderAccounts(); }})[page](P);
   fillLists();
 }
 let histLimit = 5;
@@ -1013,6 +1021,26 @@ function renderCheckApps(){
   const add = el("div", "ca-add"), inp = document.createElement("input"); inp.placeholder = "ชื่อแอปใหม่ เช่น TrueMoney"; inp.setAttribute("aria-label", "ชื่อแอปใหม่");
   const ok = el("button", "btn sm primary", "＋ เพิ่ม"); ok.type = "button";
   const go2 = () => { const v = inp.value.trim(); if (!v || CHECK_SRC.includes(v)) { inp.focus(); return; } put([...CHECK_SRC, v]); };
+  ok.addEventListener("click", go2); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go2(); } });
+  add.append(inp, ok); box.append(add);
+}
+const DEF_ACCTS = ["Make by KBank", "KBank", "SCB", "ออมสิน", "กรุงไทย", "Kept"];
+const accList = () => Array.isArray(settings.accounts) && settings.accounts.length ? settings.accounts : DEF_ACCTS;
+function renderAccounts(){
+  const box = $("accEdit"); if (!box) return;
+  box.textContent = "";
+  const list = accList(), put = l => store.setSetting("accounts", l);
+  list.forEach((s, i) => {
+    const row = el("div", "ca-row");
+    const up = el("button", "btn sm", "↑"); up.type = "button"; up.disabled = i === 0; up.setAttribute("aria-label", "เลื่อน " + s + " ขึ้น");
+    up.addEventListener("click", () => { const l = [...list]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; put(l); });
+    const del = el("button", "btn sm", "ลบ"); del.type = "button"; del.setAttribute("aria-label", "ลบ " + s);
+    del.addEventListener("click", () => { if (list.length > 1) put(list.filter(x => x !== s)); });
+    row.append(el("span", "", s), up, del); box.append(row);
+  });
+  const add = el("div", "ca-add"), inp = document.createElement("input"); inp.placeholder = "ชื่อบัญชีใหม่ เช่น TrueMoney"; inp.setAttribute("aria-label", "ชื่อบัญชีใหม่");
+  const ok = el("button", "btn sm primary", "＋ เพิ่ม"); ok.type = "button";
+  const go2 = () => { const v = inp.value.trim(); if (!v || list.includes(v)) { inp.focus(); return; } put([...list, v]); };
   ok.addEventListener("click", go2); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go2(); } });
   add.append(inp, ok); box.append(add);
 }
@@ -1108,6 +1136,7 @@ function renderOverall(P){
   if (left < 0 && s.inc > 0) flowBox.append(el("div", "hint neg", `ใช้เกินรายรับ ${fmt(-left)} บาท`));
   renderFunds($("oFunds"), true);
   renderInstallments($("oInst"));
+  renderAccPanel(P);
   renderPlanSummary($("oPlan"));
   // months of the year
   const y = curYM.slice(0,4);
@@ -1626,6 +1655,74 @@ function renderPayPlans(box){
   add.addEventListener("click", keepForm);
   wrap.append(add, form);
 }
+/* ---------- my accounts and transfers between them ---------- */
+// Which account money came in to or went out of, for the period on screen. Only bank/app transfers and cash
+// carry an account; rows typed in the sheet have none and are counted under "ไม่ระบุ".
+function accFlows(P){
+  const m = new Map(), add = (k, inn, out) => { const v = m.get(k) || {inn: 0, out: 0}; v.inn = c2(v.inn + inn); v.out = c2(v.out + out); m.set(k, v); };
+  for (const e of P){
+    if (!["income", "expense", "saving"].includes(e.kind)) continue;
+    if (e.pay && !["โอน/สแกนจ่าย", "เงินสด"].includes(e.pay)) continue; // credit card, pay later, ไทยช่วยไทย: not straight from an account
+    const k = e.pay === "เงินสด" ? "เงินสด" : e.account || "ไม่ระบุ", a = Number(e.amount) || 0;
+    if (e.kind === "income" || (e.kind === "saving" && e.side === "ขาย")) add(k, a, 0); else add(k, 0, a);
+  }
+  for (const t of transfers.filter(inPeriod)){ const a = Number(t.amount) || 0; add(t.account || "ไม่ระบุ", 0, a); add(t.group || "ไม่ระบุ", a, 0); }
+  const order = [...accList(), "เงินสด"];
+  return [...m.entries()].sort((a, b) => { const i = order.indexOf(a[0]), j = order.indexOf(b[0]); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j) || (a[0] === "ไม่ระบุ") - (b[0] === "ไม่ระบุ"); });
+}
+let trOpen = false;
+function renderAccPanel(P){
+  const box = $("oAcc"); box.textContent = "";
+  const rows = accFlows(P);
+  if (rows.length){
+    const t = el("table"), hd = el("thead"), hr = el("tr");
+    ["บัญชี", "เข้า", "ออก", "สุทธิ"].forEach((x, i) => hr.append(el("th", i ? "n" : "", x))); hd.append(hr); t.append(hd);
+    const tb = el("tbody");
+    rows.forEach(([k, v]) => { const tr = el("tr", k === "ไม่ระบุ" ? "muted" : ""), net = c2(v.inn - v.out);
+      tr.append(el("td", "", k), el("td", "n", v.inn ? fmt(v.inn) : "–"), el("td", "n", v.out ? fmt(v.out) : "–"), el("td", "n" + (net < 0 ? " neg" : ""), (net < 0 ? "−" : "") + fmt(Math.abs(net)))); tb.append(tr); });
+    t.append(tb); const sc = el("div", "scroll"); sc.append(t); box.append(sc);
+    box.append(el("p", "hint", "เงินที่เข้า-ออกแต่ละบัญชีในช่วงที่เปิดดู รวมการโอนระหว่างบัญชีด้วย แต่การโอนไม่นับเป็นรายรับหรือรายจ่าย"));
+  }
+  const list = transfers.filter(inPeriod).sort((a, b) => a.date < b.date ? 1 : -1);
+  if (list.length){
+    box.append(el("div", "cc-h", `โอนระหว่างบัญชี ${list.length} รายการ`));
+    list.forEach(t => {
+      const row = el("div", "fu-row"), info = el("div", "fu-open");
+      info.append(el("strong", "", `${fmt(t.amount)} บาท · ${t.account} → ${t.group}`), el("span", "hint", `${thaiDate(t.date)}${t.note ? " · " + t.note : ""}`));
+      const del = el("button", "btn sm", "ลบ"); del.type = "button"; let armed = false;
+      del.addEventListener("click", async () => {
+        if (!armed){ armed = true; del.textContent = "กดอีกครั้ง"; setTimeout(() => { armed = false; del.textContent = "ลบ"; }, 3000); return; }
+        try { await store.remove([t.id]); } catch (err){ toast(err.message, true); }
+      });
+      row.append(info, del); box.append(row);
+    });
+  }
+  const btn = el("button", "btn sm", "⇄ โอนระหว่างบัญชี"); btn.type = "button";
+  const f = el("div", "pp-form"); f.hidden = !trOpen;
+  const fld = (label, inp) => { const d = el("div", "field"); d.append(el("label", "", label), inp); return d; };
+  const sel = keep => { const s = el("select"); accList().forEach(a => s.append(opt(a, a))); if (keep) s.value = keep; return s; };
+  const from = sel(accList()[1] || accList()[0]), to = sel(accList()[2] || accList()[0]);
+  const amt = el("input"); amt.type = "number"; amt.step = "0.01"; amt.inputMode = "decimal"; amt.placeholder = "0.00";
+  const date = el("input"); date.type = "date"; date.value = dayPick || todayISO;
+  const note = el("input"); note.placeholder = "เช่น ย้ายเงินไปจ่ายบัตร";
+  const ok = el("button", "btn sm primary", "บันทึกการโอน"); ok.type = "button";
+  ok.addEventListener("click", async () => {
+    const a = c2(parseFloat(amt.value));
+    if (!isFinite(a) || a <= 0 || !date.value){ toast("ใส่วันที่และจำนวนเงิน", true); return; }
+    if (from.value === to.value){ toast("บัญชีต้นทางกับปลายทางต้องไม่ใช่บัญชีเดียวกัน", true); return; }
+    const e = {id: store.newId(), kind: "transfer", date: date.value, ym: ymOf(date.value), name: "โอนระหว่างบัญชี", amount: a, account: from.value, group: to.value, updatedAt: new Date().toISOString()};
+    if (note.value.trim()) e.note = note.value.trim();
+    ok.disabled = true;
+    trOpen = false; f.hidden = true;
+    try { await store.save([e]); toast(`บันทึกโอน ${fmt(a)} บาท ${from.value} → ${to.value} แล้ว`); } catch (err){ ok.disabled = false; trOpen = true; f.hidden = false; toast(err.message, true); }
+  });
+  const two = el("div", "two"); two.append(fld("จากบัญชี", from), fld("เข้าบัญชี", to));
+  const two2 = el("div", "two"); two2.append(fld("จำนวนเงิน (บาท)", amt), fld("วันที่", date));
+  f.append(two, two2, fld("หมายเหตุ", note), el("p", "hint", "โอนให้ตัวเองไม่นับเป็นรายรับหรือรายจ่าย ถ้าโอนเข้าเงินออม/ลงทุน ให้บันทึกที่หน้า ออม แทน"), ok);
+  btn.addEventListener("click", () => { trOpen = f.hidden; f.hidden = !f.hidden; if (!f.hidden) amt.focus(); });
+  box.append(btn, f);
+}
+
 /* ---------- TikTok Pay Later, paid in one go ---------- */
 // Tagged entries stay normal expenses on the day they were bought. The tag keeps a copy of the entry's
 // details because a row typed in the sheet gets a new id once its contents change.
@@ -1991,7 +2088,7 @@ function fillAcc(keep){
   showTct();
   $("fAccLabel").textContent = pay === "ผ่อนจ่าย" ? "ผ่อนกับ" : pay === "บัตรเครดิต" ? "บัตร" : kind === "income" ? "เข้าบัญชี" : "จากบัญชี";
   const used = freq(entries.filter(e => e.pay === pay), e => e.account);
-  fillPick(pk.acc, [{values: withAll(used, DEF.acc[pay] || [])}], keep);
+  fillPick(pk.acc, [{values: withAll(used, pay === "โอน/สแกนจ่าย" ? accList() : DEF.acc[pay] || [])}], keep);
   const inst = pay === "ผ่อนจ่าย" && !editing;
   $("instRow").hidden = !inst;
   updateInstHint();
@@ -2660,7 +2757,7 @@ function initStore(){
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
-  store.subscribe(list => { allEntries = list; entries = list.filter(e => e.who !== PARTNER); partner = list.filter(e => e.who === PARTNER); widenJapan(); render(); });
+  store.subscribe(all => { transfers = all.filter(e => e.kind === "transfer"); const list = all.filter(e => e.kind !== "transfer"); allEntries = list; entries = list.filter(e => e.who !== PARTNER); partner = list.filter(e => e.who === PARTNER); widenJapan(); render(); });
 
   // settings panel
   function showCfg(){
