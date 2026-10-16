@@ -135,6 +135,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 /* lists */
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);border-radius:999px;padding:3px 12px;background:transparent;cursor:pointer;font-size:.85rem}
+.chip-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline;box-shadow:0 0 0 1.5px var(--surface)}
 .chip[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .legend li.pickable{cursor:pointer}
 .legend li.pickable:hover .lb{text-decoration:underline}
@@ -764,6 +765,7 @@ function totalsBy(list, key, val = e => Number(e.amount)||0){
 const colorMaps = {};
 function colorFor(mapKey, list, key, label){
   if (mapKey === "expCat" || mapKey === "incCat") return catColor(mapKey === "expCat" ? "expense" : "income", label);
+  if (mapKey === "savGroup") return groupColor(label);
   if (!colorMaps[mapKey]) colorMaps[mapKey] = new Map((key ? totalsBy(list, key).slice(0,8) : []).map(([k], i) => [k, `var(--s${i+1})`]));
   return colorMaps[mapKey].get(label);
 }
@@ -775,6 +777,21 @@ function catColor(kind, name){
   const k = "cat-" + kind;
   if (!colorMaps[k]) colorMaps[k] = new Map(totalsBy(entries.filter(e => e.kind === kind), e => e.name).slice(0, 8).map(([n], i) => [n, `var(--s${i+1})`]));
   return colorMaps[k].get(name);
+}
+// Saving/investing pots (the group: LLY, SCBGOLD, ออมไปญี่ปุ่น...): the user's pick, else a set colour, else the
+// next free palette slot in order of size all-time, so a pot keeps its colour whatever is on screen.
+const GROUP_DEF = {"LLY": "#d9b000", "SCBGOLD": "#d94a1a"};
+function groupColor(g){
+  g = groupKey(g); if (!g) return null;
+  const own = (settings.groupColors || {})[g];
+  if (own) return own;
+  if (GROUP_DEF[g]) return GROUP_DEF[g];
+  if (!colorMaps.grp){
+    const free = ["var(--s1)", "var(--s3)", "var(--s7)", "var(--s5)", "var(--s6)"];
+    const names = totalsBy(entries.filter(e => e.kind === "saving"), e => groupKey(e.group)).map(([n]) => n).filter(n => n && n !== "ไม่ระบุหมวด" && !GROUP_DEF[n]);
+    colorMaps.grp = new Map(names.slice(0, free.length).map((n, i) => [n, free[i]]));
+  }
+  return colorMaps.grp.get(g) || null;
 }
 function cssHex(c){
   if (!c) return "#a3aaa5";
@@ -946,7 +963,7 @@ function entryItem(e, inBill){
     it.append(el("div", "t", title));
     const s = el("div", "s");
     const tags = [];
-    const cc = e.kind !== "saving" && e.name ? catColor(e.kind, e.name) : null;
+    const cc = e.kind === "saving" ? groupColor(e.group) : e.name ? catColor(e.kind, e.name) : null;
     if (cc){ it.classList.add("hascat"); it.style.setProperty("--cat", cc); }
     if (e.kind !== "saving" && e.note) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
@@ -1071,6 +1088,19 @@ function renderCatColors(){
       else if (!catColor(kind, n)) row.append(el("span", "hint", "ยังไม่มีสี"));
       box.append(row);
     }
+  }
+  const gown = settings.groupColors || {};
+  const groups = totalsBy(entries.filter(e => e.kind === "saving"), e => groupKey(e.group)).map(([n]) => n).filter(n => n && n !== "ไม่ระบุหมวด");
+  DEF.groups.forEach(n => { n = groupKey(n); if (!groups.includes(n)) groups.push(n); });
+  box.append(el("div", "cc-h", "ลงทุน/ออม (กองหรือเป้าหมาย)"));
+  for (const n of groups){
+    const row = el("div", "cc-row");
+    const inp = document.createElement("input"); inp.type = "color"; inp.value = cssHex(groupColor(n)); inp.setAttribute("aria-label", "สีของ " + n);
+    inp.addEventListener("change", () => store.setSetting("groupColors", {...(settings.groupColors || {}), [n]: inp.value}));
+    row.append(inp, el("span", "", n));
+    if (gown[n]){ const r = el("button", "btn sm", "ใช้สีเดิม"); r.type = "button"; r.addEventListener("click", () => { const c = {...(settings.groupColors || {})}; delete c[n]; store.setSetting("groupColors", c); }); row.append(r); }
+    else if (!groupColor(n)) row.append(el("span", "hint", "ยังไม่มีสี"));
+    box.append(row);
   }
 }
 function setNum(id, v, neg){ $(id).textContent = fmt(v); $(id).classList.toggle("neg", !!neg && v < 0); }
@@ -1428,6 +1458,7 @@ function renderSaving(P){
   const groups = totalsBy(savAllYears ? all : L, e => groupKey(e.group), signedSaving);
   [[null, "ทั้งหมด"], ...groups.map(([g]) => [g, g])].forEach(([g, t]) => {
     const c = el("button", "chip", t); c.type = "button";
+    const gc = g && groupColor(g); if (gc){ const d = el("i", "chip-dot"); d.style.background = gc; c.prepend(d); }
     c.setAttribute("aria-pressed", String(g === null ? !savPick : !!savPick && savPick.label === g));
     c.addEventListener("click", () => pickSavGroups(g === null ? null : [g], g, true));
     box.append(c);
