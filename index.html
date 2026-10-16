@@ -101,7 +101,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .toast{font-size:.85rem;min-height:1.2em}
 .pp{display:grid;gap:8px;margin-top:10px}.pp-card{border:1px solid var(--line);border-radius:10px;padding:8px 10px}.pp-card summary{cursor:pointer}
 .pp-row{display:grid;grid-template-columns:auto auto minmax(0,1fr) minmax(0,7.5rem);gap:8px;align-items:center;padding-top:6px}.pp-row input[type=checkbox]{width:20px;height:20px}
-.pp-row input[type=date],.pp-row input[type=number]{min-width:0;width:100%}.pp-row.late input[type=date]{color:var(--exp)}.pp-form{display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px}.pp>.btn.sm{justify-self:start}
+.pp-row .datebox input,.pp-row input[type=number]{min-width:0;width:100%}.pp-row.late .datebox input{color:var(--exp)}.pp-form{display:grid;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px}.pp>.btn.sm{justify-self:start}
 .yc-leg{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;color:var(--muted);margin-bottom:4px}.yc-key{display:inline-flex;align-items:center;gap:6px}.yc-key i,.yc-tl i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .yc-wrap{position:relative;touch-action:pan-y;margin-bottom:10px}.yc{width:100%;height:auto;display:block}.yc-ax{font-size:9px;fill:var(--muted)}.yc-grid{stroke:var(--line);stroke-width:1}.yc-base{stroke:var(--muted);stroke-width:1}
 .yc-hl{fill:var(--fg);opacity:.06}.yc-line{fill:none;stroke:var(--s1);stroke-width:2;stroke-linejoin:round}.yc-dot{fill:var(--s1);stroke:var(--surface);stroke-width:2}
@@ -598,7 +598,7 @@ details summary{cursor:pointer;font-weight:500}
     <div class="hint" id="instHint" hidden></div>
     <div class="pl-row" id="plRow" hidden>
       <label class="check"><input type="checkbox" id="fPL"> 💳 จ่ายด้วย TikTok Pay Later (จ่ายเต็มรอบเดียว)</label>
-      <div class="field" id="plDueField" hidden><label for="fPLDue">ครบกำหนดจ่ายวันที่</label><input id="fPLDue" type="date"></div>
+      <div class="field" id="plDueField" hidden><label for="fPLDue">ครบกำหนดจ่ายวันที่ (วัน/เดือน/ปี)</label><input id="fPLDue" type="date"></div>
     </div>
     <button class="btn sm" type="button" id="ppFromEntry" hidden>💳 ซื้อแบบ Pay Later / ผ่อน? สร้างตารางจ่ายของรายการนี้</button>
     <label class="check fu-check"><input type="checkbox" id="fFollow"> ⏰ เตือนที่หน้า Overall ให้กลับมาเช็ครายการนี้ (จำไม่ได้ว่าเป็นค่าอะไร ไว้เติมทีหลัง)</label>
@@ -1750,7 +1750,7 @@ function renderPayPlans(box){
       dt.addEventListener("change", () => { if (dt.value) editPlan(p.id, q => { q.dues[i].date = dt.value; return q; }); });
       const am = el("input"); am.type = "number"; am.step = "0.01"; am.inputMode = "decimal"; am.value = d.amount;
       am.addEventListener("change", () => { const v = c2(parseFloat(am.value) || 0); editPlan(p.id, q => { q.dues[i].amount = v; return q; }); });
-      row.append(ck, el("span", "hint", `งวด ${i + 1}`), dt, am);
+      row.append(ck, el("span", "hint", `งวด ${i + 1}`), dmy(dt), am);
       card.append(row);
     });
     const del = el("button", "btn sm danger", "ลบตารางนี้"); del.type = "button";
@@ -1782,7 +1782,7 @@ function renderPayPlans(box){
   });
   const two = el("div", "two"); two.append(fld("ชื่อ", lab), fld("จ่ายกับ", acc));
   const three = el("div", "two"); three.append(fld("ยอดรวม (บาท)", tot), fld("กี่งวด", n));
-  form.append(two, three, fld("จ่ายงวดแรกวันที่", first), dl,
+  form.append(two, three, fld("จ่ายงวดแรกวันที่", dmy(first)), dl,
     el("p", "hint", "ของที่ซื้อให้บันทึกเป็นรายจ่ายตามวันที่ซื้อเหมือนเดิม ตารางนี้ไว้เตือนว่าเดือนไหนต้องจ่ายเท่าไร ไม่นับเป็นรายจ่ายซ้ำ"), ok);
   add.addEventListener("click", () => { form.hidden = !form.hidden; if (!form.hidden) lab.focus(); });
   if (ppDraft){ ppForm = {open: true, lab: ppDraft.label, tot: String(ppDraft.total)}; ppDraft = null; }
@@ -1856,7 +1856,7 @@ function renderAccPanel(P){
     try { await store.save([e]); toast(`บันทึกโอน ${fmt(a)} บาท ${from.value} → ${to.value} แล้ว`); } catch (err){ ok.disabled = false; trOpen = true; f.hidden = false; toast(err.message, true); }
   });
   const two = el("div", "two"); two.append(fld("จากบัญชี", from), fld("เข้าบัญชี", to));
-  const two2 = el("div", "two"); two2.append(fld("จำนวนเงิน (บาท)", amt), fld("วันที่", date));
+  const two2 = el("div", "two"); two2.append(fld("จำนวนเงิน (บาท)", amt), fld("วันที่", dmy(date)));
   f.append(two, two2, fld("หมายเหตุ", note), el("p", "hint", "โอนให้ตัวเองไม่นับเป็นรายรับหรือรายจ่าย ถ้าโอนเข้าเงินออม/ลงทุน ให้บันทึกที่หน้า ออม แทน"), ok);
   btn.addEventListener("click", () => { trOpen = f.hidden; f.hidden = !f.hidden; if (!f.hidden) amt.focus(); });
   box.append(btn, f);
@@ -2640,6 +2640,34 @@ $("billSave").addEventListener("click", async () => {
 });
 
 /* ---------- date as day/month/year ---------- */
+// Any date field shown and typed as วัน/เดือน/ปี whatever the browser's language; the real date input stays
+// behind the 📅 button for its picker and keeps the yyyy-mm-dd value the code reads. Returns the box to put on the page.
+function dmy(d){
+  const box = el("div", "datebox"), t = el("input"), b = el("button", "btn sm", "📅");
+  t.placeholder = "วว/ดด/ปปปป"; t.inputMode = "numeric"; t.maxLength = 10; t.autocomplete = "off";
+  b.type = "button"; b.setAttribute("aria-label", "เลือกวันที่จากปฏิทิน");
+  if (d.id){ t.id = d.id + "Text"; const l = document.querySelector(`label[for="${d.id}"]`); if (l) l.htmlFor = t.id; }
+  if (d.parentNode) d.parentNode.insertBefore(box, d);
+  d.tabIndex = -1; d.setAttribute("aria-hidden", "true"); d.classList.add("vh");
+  box.append(t, b, d);
+  const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  const show = () => { const v = desc.get.call(d); t.value = v ? thaiDate(v) : ""; t.setCustomValidity(""); };
+  Object.defineProperty(d, "value", {get(){ return desc.get.call(d); }, set(v){ desc.set.call(d, v); show(); }});
+  show();
+  t.addEventListener("input", () => {
+    const m = t.value.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+    let iso = "";
+    if (m){ let y = +m[3]; if (y > 2400) y -= 543; const dt = new Date(y, m[2] - 1, m[1]); if (dt.getMonth() === m[2] - 1 && dt.getDate() === +m[1]) iso = `${y}-${pad(m[2])}-${pad(m[1])}`; }
+    desc.set.call(d, iso);
+    t.setCustomValidity(t.value && !iso ? "ใส่วันที่แบบ วัน/เดือน/ปี เช่น 10/11/2026" : "");
+    d.dispatchEvent(new Event("input"));
+  });
+  t.addEventListener("change", () => { if (desc.get.call(d)){ show(); d.dispatchEvent(new Event("change")); } });
+  d.addEventListener("change", ev => { if (ev.isTrusted) show(); });
+  b.addEventListener("click", () => { try { d.showPicker(); } catch { d.focus(); d.click(); } });
+  return box;
+}
+dmy($("fPLDue"));
 (() => {
   const d = $("fDate"), t = $("fDateText");
   const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
