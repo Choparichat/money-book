@@ -1422,7 +1422,7 @@ function renderSaving(P){
   const L = P.filter(e => e.kind === "saving"), all = entries.filter(e => e.kind === "saving");
   const s = sums(L);
   setNum("sBuy", s.buy); setNum("sSell", s.sell); setNum("sNet", s.sav, true);
-  donut($("sPie"), totalsBy(L, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g));
+  donut($("sPie"), totalsBy(L, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g, true));
   donut($("sPieApp"), totalsBy(L, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน");
   renderFunds($("sFunds"), false);
   { // invested per month this year, and which months had nothing
@@ -1465,6 +1465,7 @@ function renderSaving(P){
   });
   if (savPick && !groups.some(([g]) => g === savPick.label) && !savPick.fund){ const c = el("button", "chip", savPick.label); c.type = "button"; c.setAttribute("aria-pressed", "true"); box.append(c); }
   $("sAllYears").setAttribute("aria-pressed", String(savAllYears));
+  $("sAllYears").textContent = savAllYears ? `กลับไปดูเฉพาะ${mode === "month" ? "เดือน" : "ปี"}นี้` : "ดูทุกปี";
   let src = savAllYears ? all : L;
   if (savPick?.withPartner) src = src.concat(partner.filter(e => e.kind === "saving" && (savAllYears || inPeriod(e))));
   const rows = savPick ? src.filter(e => savPick.groups.has(groupKey(e.group)) && (!savPick.month || e.date.startsWith(savPick.month))) : src;
@@ -1474,14 +1475,16 @@ function renderSaving(P){
 }
 // Check one group (or a goal's groups): oldest first, with the running total, so a missing or
 // mistyped row is easy to spot.
-let savPick = null, savAllYears = false;
+// savForced: all-years was switched on by opening a goal, not by the user, so picking a pot goes back to the month
+let savPick = null, savAllYears = false, savForced = false;
 function pickSavGroups(groups, label, fromChip, withPartner, month){
   savPick = groups ? {groups: new Set(groups.map(groupKey)), label: groupKey(label), fund: groups.length > 1 || !!withPartner, withPartner: !!withPartner, month} : null;
-  if (groups && !fromChip) savAllYears = true;
+  if (groups && !fromChip){ if (!savAllYears) savForced = true; savAllYears = true; }
+  else if (fromChip && savForced){ savAllYears = false; savForced = false; }
   if (page !== "saving") go("saving"); else render();
   if (groups && !fromChip) $("sListTitle").scrollIntoView({behavior: "smooth", block: "start"});
 }
-$("sAllYears").addEventListener("click", () => { savAllYears = !savAllYears; if (savPick) savPick.month = null; render(); });
+$("sAllYears").addEventListener("click", () => { savAllYears = !savAllYears; savForced = false; if (savPick) savPick.month = null; render(); });
 function savingLedger(box, rows){
   box.textContent = "";
   rows = [...rows].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
