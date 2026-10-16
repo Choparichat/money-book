@@ -438,6 +438,7 @@ details summary{cursor:pointer;font-weight:500}
       <div id="sFunds"></div>
       <div class="hint">ยอดสะสมนับจากรายการ ลงทุน/ออม ที่อยู่ในกลุ่มที่เลือกไว้ในเป้าหมาย ทุกปีตั้งแต่อดีตถึงวันนี้ (ซื้อ − ขาย)</div>
     </div>
+    <div class="panel-head" style="margin:4px 2px -4px"><div class="chips"><button class="chip" type="button" id="sPiePeriod" aria-pressed="true">ช่วงที่เลือก</button><button class="chip" type="button" id="sPieAll" aria-pressed="false">ทั้งหมดตั้งแต่เริ่ม</button></div><span class="hint" id="sPieNote"></span></div>
     <div class="grid2">
       <div class="panel"><h2>แยกตามกลุ่ม/กองทุน</h2><div id="sPie"></div></div>
       <div class="panel"><h2>แยกตามแอป/บัญชี</h2><div id="sPieApp"></div></div>
@@ -1555,12 +1556,20 @@ function renderExpense(P){
   entryList($("eList"), L.filter(e => (!listFilter.expense || (e.name || "ไม่ระบุหมวด") === listFilter.expense) && (!dayPick || e.date === dayPick)), "expense");
 }
 
+let sPieAll = false;
+$("sPiePeriod").addEventListener("click", () => { sPieAll = false; render(); });
+$("sPieAll").addEventListener("click", () => { sPieAll = true; render(); });
 function renderSaving(P){
   const L = P.filter(e => e.kind === "saving"), all = entries.filter(e => e.kind === "saving");
   const s = sums(L);
   setNum("sBuy", s.buy); setNum("sSell", s.sell); setNum("sNet", s.sav, true);
-  donut($("sPie"), totalsBy(L, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g, true));
-  donut($("sPieApp"), totalsBy(L, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน");
+  // the two donuts: the period on screen, or everything from the first entry until today
+  const PL = sPieAll ? all : L;
+  $("sPiePeriod").setAttribute("aria-pressed", String(!sPieAll)); $("sPieAll").setAttribute("aria-pressed", String(sPieAll));
+  { const t = sums(PL), first = PL.reduce((a, e) => !a || e.date < a ? e.date : a, "");
+    $("sPieNote").textContent = sPieAll ? (first ? `ตั้งแต่ ${thaiDate(first)} ถึงวันนี้ · ซื้อ ${fmt(t.buy)} · ขาย ${fmt(t.sell)} · สุทธิ ${fmt(t.sav)} บาท` : "ยังไม่มีรายการ") : periodLabel(); }
+  donut($("sPie"), totalsBy(PL, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g, true));
+  donut($("sPieApp"), totalsBy(PL, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน");
   renderFunds($("sFunds"), false);
   { // invested per month this year, and which months had nothing
     const y = curYM.slice(0, 4), yl = all.filter(e => e.date.startsWith(y + "-")), inc = entries.filter(e => e.kind === "income" && e.date.startsWith(y + "-"));
