@@ -3041,11 +3041,21 @@ function initStore(){
     else status(n ? `ยังไม่ได้ส่งขึ้น Google Sheet ${n} รายการ จะลองใหม่อัตโนมัติ` : `ซิงก์กับ Google Sheet แล้ว ${fmtTime()}`, !!n);
   }
   const ERR = {wrong_key:"รหัสลับไม่ตรงกับในสคริปต์", secret_not_set:"ยังไม่ได้ตั้งรหัสลับในสคริปต์"};
+  // fetch() only says "failed". Tell apart no internet, a script link that no longer opens, and the
+  // script itself crashing on this save (Google then answers with an error page the browser can't read).
+  async function whyFailed(c){
+    if (navigator.onLine === false) return "เครื่องนี้ไม่ได้ต่ออินเทอร์เน็ต";
+    try { const r = await fetch(c.url), t = await r.text(); if (/สมุดรายรับ/.test(t)) return "สคริปต์ในชีตทำงานผิดพลาดระหว่างบันทึก (เน็ตปกติ)"; }
+    catch {}
+    return "เปิดลิงก์สคริปต์ไม่ได้ อาจต้อง Deploy ใหม่หรือตั้งสิทธิ์ให้ทุกคนเข้าถึงได้";
+  }
+  const opName = o => o.op === "setting" ? `การตั้งค่า "${o.key}"` : o.op === "sheetEdit" ? `แก้แถว ${o.row} แท็บ ${o.tab}` : o.op === "sheetDel" ? `ลบแถว ${o.row} แท็บ ${o.tab}`
+    : o.op === "del" ? "การลบรายการ" : o.op === "replaceAll" ? "การนำเข้าข้อมูล" : `รายการ "${(o.entry && (o.entry.note || o.entry.name)) || ""}"`;
   async function call(body, c = cfg){
     let r;
     try { r = await fetch(c.url, {method:"POST", body: JSON.stringify({...body, key: c.key})}); }
-    catch { throw new Error("ต่ออินเทอร์เน็ตไม่ได้"); }
-    let j; try { j = await r.json(); } catch { throw new Error("ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้"); }
+    catch { throw new Error(await whyFailed(c)); }
+    let j; try { j = await r.json(); } catch { const w = await whyFailed(c); throw new Error(/เปิดลิงก์/.test(w) ? "ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้" : w); }
     if (!j.ok) throw new Error(ERR[j.error] || j.error || "เชื่อมต่อไม่สำเร็จ");
     return j;
   }
@@ -3068,18 +3078,30 @@ function initStore(){
     if (!q.length){ idle(); return; }
     busy = true;
     status("กำลังส่งขึ้น Google Sheet…");
-    let ok = false;
+    let ok = false, clean = false;
     try {
       const j = await call({ops: q.map(({seq, ...op}) => op)});
       const sent = new Set(q.map(o => o.seq));
       ls.set(Q, ls.get(Q, []).filter(o => !sent.has(o.seq)));
-      ok = true;
+      ok = true; clean = true;
       if (q.some(o => o.op === "sheetEdit" || o.op === "sheetDel")) setTimeout(() => {
         pull().then(() => { if (j.conflicts){ const m = `แก้ไม่สำเร็จ ${j.conflicts} รายการ เพราะแถวนั้นในชีตถูกแก้หรือย้ายไปก่อนแล้ว แอปจึงแสดงค่าล่าสุดจากชีต ลองแก้อีกครั้ง`; status(m, true); alert(m); } });
       }, 0);
-    } catch (err){ status(`ยังส่งขึ้น Google Sheet ไม่ได้: ${err.message}`, true); }
+    } catch (err){
+      // one bad change must not hold back the rest: send them one by one, keep only what still fails
+      let bad = [];
+      if (q.length > 1 && !/รหัสลับ|ไม่ได้ต่ออินเทอร์เน็ต|เปิดลิงก์/.test(err.message)){
+        for (const o of q){
+          try { const {seq, ...op} = o; await call({ops: [op]}); ls.set(Q, ls.get(Q, []).filter(x => x.seq !== o.seq)); }
+          catch (e2){ bad.push([o, e2.message]); }
+        }
+        if (bad.length < q.length){ ok = true; setTimeout(() => pull(), 0); }
+      } else bad = [[q[0], err.message]];
+      const [o, m] = bad[0] || [q[0], err.message];
+      if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${opName(o)}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ`, true);
+    }
     finally { busy = false; }
-    if (ok){ if (ls.get(Q, []).length) flush(); else idle(); }
+    if (ok){ if (!ls.get(Q, []).length) idle(); else if (clean) flush(); }
   }
   async function pull(){
     if (!cfg) return;
