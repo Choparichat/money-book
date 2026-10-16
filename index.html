@@ -1058,21 +1058,29 @@ function chips(box, rows, key){
 // Payment and account chosen for sheet rows live in settings.sheetPay, matched to the row by id or,
 // if the id moved, by its content (one row per record), and are put back on the row each render.
 const sheetPays = () => settings.sheetPay || {};
+// app-only details kept for a sheet row: pay and account always, the rest only once they were set ("" = cleared)
+const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer"];
+function sheetPayPut(e, t){
+  e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account;
+  SHEET_EXTRA.forEach(k => { if (k in t){ if (t[k]) e[k] = t[k]; else delete e[k]; } });
+}
 function sheetPayApply(){
   const m = sheetPays(), used = new Set(), rest = [];
   for (const [id, t] of Object.entries(m)){
     const e = allEntries.find(x => x.id === id && x.src === "sheet");
-    if (e && !used.has(e)){ used.add(e); e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account; } else rest.push(t);
+    if (e && !used.has(e)){ used.add(e); sheetPayPut(e, t); } else rest.push(t);
   }
   for (const t of rest){
     const e = allEntries.find(x => x.src === "sheet" && !used.has(x) && plSame(x, t));
-    if (e){ used.add(e); e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account; }
+    if (e){ used.add(e); sheetPayPut(e, t); }
   }
 }
-function setSheetPay(orig, upd, pay, account){
+function setSheetPay(orig, upd){
   const m = {...sheetPays()};
   for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && plSame(orig, t))) delete m[id];
-  if (pay && (pay !== "เงินสด" || account)) m[upd.id] = {...plSnap(upd), pay, ...(account ? {account} : {})};
+  const rec = {...plSnap(upd), pay: upd.pay || "", ...(upd.account ? {account: upd.account} : {})};
+  SHEET_EXTRA.forEach(k => rec[k] = upd[k] || "");
+  if (rec.pay && (rec.pay !== "เงินสด" || rec.account || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
   if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
 }
 function render(){
@@ -2533,11 +2541,11 @@ function updateInstHint(){
 }
 
 // Rows typed in the sheet's year tabs are edited in place there; the sheet has no column
-// for the app-only details (who, shop...), so those fields are hidden for them. Payment and account
-// are kept by the app instead (settings.sheetPay), see sheetPayApply.
+// for the app-only details; the app keeps payment, account, shop, whose, unit, time and payer for them
+// itself (settings.sheetPay, see sheetPayApply). Kind and partner stay as the sheet has them.
 function sheetMode(e){
   const on = !!(e && e.src === "sheet");
-  ["kindSeg", "snapBox", "bizField", "shopField", "instRow", "whoField", "unitField"].forEach(id => { if (on) $(id).hidden = true; });
+  ["kindSeg", "snapBox", "instRow", "whoField"].forEach(id => { if (on) $(id).hidden = true; });
   if (!on){ ["kindSeg", "payRow", "whoField", "unitField"].forEach(id => $(id).hidden = false); if (readReceipt) $("snapBox").hidden = false; }
   $("sheetNote").hidden = !on;
   if (on) $("sheetNote").textContent = `รายการนี้อยู่ในชีต แท็บ ${e.tab || "ปี"} แถว ${e.row || "?"} แก้แล้วแอปจะเขียนกลับไปที่แถวเดิมในชีตให้`;
@@ -2560,7 +2568,6 @@ function openForm(e){
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
     setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || "";
-    if (e.src === "sheet") $("incRow").hidden = true;
     $("fFollow").checked = fuIds().includes(e.id); // rows typed in the sheet's year tab have no time/name columns
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
@@ -2635,8 +2642,9 @@ $("entryForm").addEventListener("submit", async ev => {
     if (kind !== "saving"){
       if (base.pay === TCT){ toast("รายการที่อยู่ในชีตใช้ \"ไทยช่วยไทย\" ไม่ได้ เลือกช่องทางจ่ายอื่นนะคะ", true); return; }
       upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
+      SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
     }
-    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd, upd.pay, upd.account); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
