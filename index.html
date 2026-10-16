@@ -106,6 +106,8 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .yc-wrap{position:relative;touch-action:pan-y;margin-bottom:10px}.yc{width:100%;height:auto;display:block}.yc-ax{font-size:9px;fill:var(--muted)}.yc-grid{stroke:var(--line);stroke-width:1}.yc-base{stroke:var(--muted);stroke-width:1}
 .yc-hl{fill:var(--fg);opacity:.06}.yc-line{fill:none;stroke:var(--s1);stroke-width:2;stroke-linejoin:round}.yc-dot{fill:var(--s1);stroke:var(--surface);stroke-width:2}
 .yc-gap{fill:none;stroke:var(--muted);stroke-width:1.5}.yc-gapkey{width:9px!important;height:9px!important;border-radius:50%!important;border:1.5px solid var(--muted);box-sizing:border-box}
+#sYearChart{display:grid;gap:12px;align-items:start}@media (min-width:640px){#sYearChart{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.ys-t{width:100%;font-size:.85rem;border-collapse:collapse}.ys-t th,.ys-t td{padding:3px 4px}.ys-t th{font-weight:500;color:var(--muted)}.ys-t tr.muted td{color:var(--muted)}.ys-t tfoot td{font-weight:600;border-top:1px solid var(--line)}
 .yc-cap{font-size:.8rem;color:var(--muted);margin:6px 0 0}.yc-tip{position:absolute;top:0;z-index:2;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:.8rem;min-width:150px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
 .yc-tl{display:flex;align-items:center;gap:6px;margin-top:2px}.yc-tl b{margin-left:auto;font-variant-numeric:tabular-nums}
 .pl-alert-items{grid-column:1/-1;display:grid;padding-left:8px}.pl-alert-items .pl-item{font-size:.92rem}
@@ -1170,14 +1172,14 @@ function renderOverall(P){
 // small line chart underneath (a percent never shares an axis with baht). Hover or tap a month for its numbers.
 const YC_ALL = [["inc", "รายรับ", "var(--s3)"], ["exp", "รายจ่าย", "var(--s2)"], ["sav", "ออม + ลงทุน", "var(--s1)"]];
 // gaps: month numbers (0-based) to mark with a hollow dot on the baseline, e.g. months nothing was invested
-function yearChart(box, rows, SER = YC_ALL, gaps = []){
+function yearChart(box, rows, SER = YC_ALL, gaps = [], compact = false){
   box.textContent = "";
   const NS = "http://www.w3.org/2000/svg", mk = (t, at) => { const x = document.createElementNS(NS, t); for (const k in at) x.setAttribute(k, at[k]); return x; };
   const leg = el("div", "yc-leg");
   if (SER.length > 1) SER.forEach(([, n, c]) => { const i = el("span", "yc-key"); const sw = el("i"); sw.style.background = c; i.append(sw, document.createTextNode(n)); leg.append(i); });
   if (gaps.length){ const i = el("span", "yc-key"); i.append(el("i", "yc-gapkey"), document.createTextNode("เดือนที่ไม่ได้ลงทุน")); leg.append(i); }
   if (leg.childNodes.length) box.append(leg);
-  const W = 360, H = 170, L = 40, R = 6, T = 8, B = 20, pw = W - L - R, ph = H - T - B, gw = pw / 12;
+  const W = 360, H = compact ? 130 : 170, L = 40, R = 6, T = 8, B = 20, pw = W - L - R, ph = H - T - B, gw = pw / 12;
   const max = Math.max(1, ...rows.flatMap(r => SER.map(([k]) => Math.max(0, Number(r[k]) || 0))));
   const step = (m => { const p = Math.pow(10, Math.floor(Math.log10(m / 4))); return [1, 2, 2.5, 5, 10].map(k => k * p).find(k => k * 4 >= m); })(max), top = step * 4;
   const y = v => T + ph - v / top * ph, fmtK = v => v >= 1000 ? (v / 1000) + "k" : String(v);
@@ -1212,7 +1214,7 @@ function yearChart(box, rows, SER = YC_ALL, gaps = []){
   // hover/tap: one band per month across both charts
   const tip = el("div", "yc-tip"); tip.hidden = true;
   const wrap = el("div", "yc-wrap"), cap = el("div", "yc-cap", "% ออม + ลงทุน ต่อรายรับ");
-  wrap.append(svg, cap, svg2, tip);
+  if (compact) wrap.append(svg, tip); else wrap.append(svg, cap, svg2, tip);
   const hl = [svg, svg2].map(sv => { const b = mk("rect", {y: 0, width: gw, height: sv === svg ? H - B + 2 : H2 - B2 + 2, class: "yc-hl"}); b.style.display = "none"; sv.insertBefore(b, sv.firstChild); return b; });
   const show = m => {
     if (m < 0){ tip.hidden = true; hl.forEach(b => b.style.display = "none"); return; }
@@ -1399,7 +1401,25 @@ function renderSaving(P){
     const rows = Array.from({length: 12}, (_, i) => { const mm = `${y}-${pad(i + 1)}`; return {sav: sums(yl.filter(e => e.date.startsWith(mm))).sav, inc: sums(inc.filter(e => e.date.startsWith(mm))).inc}; });
     const gaps = rows.map((r, i) => i < last && r.sav <= 0 ? i : -1).filter(i => i >= 0);
     $("sYearTitle").textContent = `ลงทุน/ออมแต่ละเดือน ปี ${y}`;
-    yearChart($("sYearChart"), rows, [["sav", "ออม + ลงทุน", "var(--s1)"]], gaps);
+    // chart on the left, the month-by-month figures on the right (stacked on a narrow screen)
+    const box = $("sYearChart"); box.textContent = "";
+    const left = el("div", "ys-chart"), right = el("div", "ys-list");
+    box.append(left, right);
+    yearChart(left, rows, [["sav", "ออม + ลงทุน", "var(--s1)"]], gaps, true);
+    const t = el("table", "ys-t"), hd = el("tr");
+    ["เดือน", "ออม + ลงทุน", "% รายรับ"].forEach((x, i) => hd.append(el("th", i ? "n" : "", x)));
+    const th = el("thead"); th.append(hd); t.append(th);
+    const tb = el("tbody");
+    rows.forEach((r, i) => {
+      if (i >= Math.max(last, rows.findLastIndex(x => x.sav) + 1)) return; // months still ahead
+      const none = gaps.includes(i), tr = el("tr", none ? "muted" : "");
+      tr.append(el("td", "", TH_MONTHS[i]), el("td", "n", none ? "ไม่ได้ลงทุน" : fmt(r.sav)), el("td", "n", r.inc ? (Math.max(0, r.sav) / r.inc * 100).toFixed(2) + "%" : "—"));
+      tb.append(tr);
+    });
+    t.append(tb);
+    const tot = rows.reduce((a, r) => a + r.sav, 0), ti = rows.reduce((a, r) => a + r.inc, 0), tf = el("tfoot"), fr = el("tr");
+    fr.append(el("td", "", "รวม"), el("td", "n", fmt(tot)), el("td", "n", ti ? (Math.max(0, tot) / ti * 100).toFixed(2) + "%" : "—")); tf.append(fr); t.append(tf);
+    right.append(t);
     const done = rows.slice(0, last).filter(r => r.sav > 0).length;
     $("sYearNote").textContent = last ? `ลงทุนแล้ว ${done} จาก ${last} เดือน · รวม ${fmt(rows.reduce((a, r) => a + r.sav, 0))} บาท` + (gaps.length ? ` · ไม่ได้ลงทุน: ${gaps.map(i => TH_MONTHS[i]).join(", ")}` : " · ลงทุนครบทุกเดือน") : "";
   }
