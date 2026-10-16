@@ -146,7 +146,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 /* lists */
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);border-radius:999px;padding:3px 12px;background:transparent;cursor:pointer;font-size:.85rem}
-.acc-chip{display:inline-block;padding:0 6px;border-radius:6px;font-weight:600;line-height:1.5}
+.acc-chip{box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);display:inline-block;padding:0 6px;border-radius:6px;font-weight:600;line-height:1.5}
 .chip-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline;box-shadow:0 0 0 1.5px var(--surface)}
 .chip[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .legend li.pickable{cursor:pointer}
@@ -814,7 +814,7 @@ function groupColor(g){
   return colorMaps.grp.get(g) || null;
 }
 // Bank/app accounts get their own colour wherever the name shows (entry tags, บัญชีของฉัน, transfers).
-const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400"};
+const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff"};
 const accColor = a => a ? (settings.accColors || {})[a] || ACC_DEF[a] || null : null;
 function accChip(a){
   const c = accColor(a); if (!c) return document.createTextNode(a);
@@ -1266,7 +1266,8 @@ function renderCatColors(){
   }
   const aown = settings.accColors || {};
   box.append(el("div", "cc-h", "บัญชี / ช่องทางจ่าย"));
-  for (const n of accList()){
+  const accNames = [...new Set([...accList(), ...Object.keys(ACC_DEF).filter(n => entries.some(e => e.account === n)), ...Object.keys(aown), ...entries.map(e => e.account).filter(Boolean)])];
+  for (const n of accNames){
     const row = el("div", "cc-row");
     const inp = document.createElement("input"); inp.type = "color"; inp.value = cssHex(accColor(n) || "#888888"); inp.setAttribute("aria-label", "สีของ " + n);
     inp.addEventListener("change", () => store.setSetting("accColors", {...(settings.accColors || {}), [n]: inp.value}));
