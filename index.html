@@ -3068,6 +3068,7 @@ function initStore(){
     catch { throw new Error(await whyFailed(c)); }
     let j; try { j = await r.json(); } catch { const w = await whyFailed(c); throw new Error(/เปิดลิงก์/.test(w) ? "ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้" : w); }
     if (!j.ok) throw new Error(ERR[j.error] || j.error || "เชื่อมต่อไม่สำเร็จ");
+    if (j.version) ls.set("money-book-script", j.version);
     return j;
   }
   let seq = Date.now();
@@ -3113,7 +3114,9 @@ function initStore(){
         }
         if (bad.length < q.length){ ok = true; setTimeout(() => pull(), 0); }
       } else bad = [[q[0], err.message]];
-      const [o, m] = bad[0] || [q[0], err.message];
+      let [o, m] = bad[0] || [q[0], err.message];
+      // the script before version 5 crashes when a sheet cell's dropdown refuses the new value; the new one copes
+      if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 5) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะส่งได้เอง";
       if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ`, true);
     }
     finally { busy = false; }
