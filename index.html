@@ -87,6 +87,9 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .sa-n strong{font-weight:600}.sa-f{display:grid;grid-template-columns:minmax(0,1fr) 70px auto auto;gap:6px;align-items:center}
 .sa-f input,.sa-f select{min-width:0;padding:6px 8px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;gap:12px;min-width:0;align-content:start}
+.srch input{width:100%;font-size:16px}
+.srch-sum{margin:10px 0 6px}
+.srch table{margin-bottom:8px}
 .panel-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center}
 .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .tiles.t3{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -380,6 +383,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="tile"><span class="k">จำนวนรายการ</span><span class="v num" id="iCnt">0</span></div>
       <div class="tile"><span class="k">เฉลี่ยต่อเดือน (ปีนี้)</span><span class="v num" id="iAvg">0</span></div>
     </div>
+    <div class="panel srch"><input type="search" id="iSearch" placeholder="🔍 ค้นหารายรับทุกปี เช่น หมวด ชื่อของ ร้าน บัญชี" aria-label="ค้นหารายรับ" autocomplete="off"><div id="iSearchOut"></div></div>
     <div class="grid2">
       <div class="panel"><h2>รายรับตามหมวด</h2><div id="iPie"></div></div>
       <div class="panel"><h2>รับเงินทาง</h2><div id="iPiePay"></div></div>
@@ -395,6 +399,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="tile"><span class="k">ไม่รวม Muan</span><span class="v num" id="eNoShop">0</span></div>
       <div class="tile"><span class="k">ผ่อนที่ถึงกำหนดในช่วงนี้</span><span class="v num" id="eInst">0</span></div>
     </div>
+    <div class="panel srch"><input type="search" id="eSearch" placeholder="🔍 ค้นหารายจ่ายทุกปี เช่น หมวด ชื่อของ ร้าน บัญชี" aria-label="ค้นหารายจ่าย" autocomplete="off"><div id="eSearchOut"></div></div>
     <div class="grid2">
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="ePie"></div></div>
       <div class="panel"><h2>จ่ายด้วยอะไร</h2><div id="ePiePay"></div></div>
@@ -928,6 +933,29 @@ function makeDraggable(block, day, key){
   block.addEventListener("pointermove", ev => { if (timer && (Math.abs(ev.clientY - startY) > 8 || Math.abs(ev.clientX - startX) > 8)) stopTimer(); });
   block.addEventListener("contextmenu", ev => ev.preventDefault());
 }
+// Search every entry of this kind, all years: each word typed must appear in the category, detail, shop,
+// account or other text of the entry. Shows a count, total, what was bought most, then the entries.
+function renderSearch(kind){
+  const k = kind === "income" ? "i" : "e", q = $(k + "Search").value.trim().toLowerCase(), out = $(k + "SearchOut");
+  out.textContent = ""; if (!q) return;
+  const words = q.split(/\s+/);
+  const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit].filter(Boolean).join(" ").toLowerCase();
+  const hits = entries.filter(e => e.kind === kind && (h => words.every(w => h.includes(w)))(hay(e)));
+  const total = c2(hits.reduce((a, e) => a + (Number(e.amount) || 0), 0));
+  out.append(el("p", "hint srch-sum", hits.length ? `พบ ${hits.length} รายการ · รวม ${fmt(total)} บาท${hits.length ? ` · ${thaiDate(hits.reduce((a, e) => e.date < a ? e.date : a, hits[0].date))} ถึง ${thaiDate(hits.reduce((a, e) => e.date > a ? e.date : a, hits[0].date))}` : ""}` : "ไม่พบรายการที่ตรงกับคำค้น"));
+  if (!hits.length) return;
+  const by = new Map();
+  hits.forEach(e => { const n = e.note || e.name || "ไม่ระบุ", v = by.get(n) || {n: 0, t: 0, last: ""}; v.n++; v.t = c2(v.t + (Number(e.amount) || 0)); if (e.date > v.last) v.last = e.date; by.set(n, v); });
+  if (by.size > 1){
+    const t = el("table"), hd = el("thead"), hr = el("tr"), tb = el("tbody");
+    ["รายการ", "กี่ครั้ง", "รวม", "ล่าสุด"].forEach((x, i) => hr.append(el("th", i === 1 || i === 2 ? "n" : "", x))); hd.append(hr); t.append(hd);
+    [...by].sort((a, b) => b[1].t - a[1].t).slice(0, 10).forEach(([n, v]) => { const tr = el("tr"); tr.append(el("td", "", n), el("td", "n", String(v.n)), el("td", "n", fmt(v.t)), el("td", "", thaiDate(v.last))); tb.append(tr); });
+    t.append(tb); const sc = el("div", "scroll"); sc.append(t); out.append(sc);
+    if (by.size > 10) out.append(el("p", "hint", `และอีก ${by.size - 10} อย่าง`));
+  }
+  const list = el("div", "list"); out.append(list); entryList(list, hits, "search-" + kind);
+}
+["income", "expense"].forEach(kind => { let tm; $((kind === "income" ? "i" : "e") + "Search").addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => renderSearch(kind), 150); }); });
 function entryList(box, list, key){
   box.textContent = "";
   const rows = list.map((e, i) => [e, i]).sort(([a, ia], [b, ib]) => a.date < b.date ? 1 : a.date > b.date ? -1 : (dayRank(a) - dayRank(b)) || (ia - ib)).map(([e]) => e);
@@ -1366,6 +1394,7 @@ function renderIncome(P){
   chips($("iChips"), byCat, "income");
   const cy = calYM(); $("iCalTitle").textContent = `ปฏิทินรายรับ ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("iCal"), cy, iso => pickDay(iso, "income"), "income");
+  renderSearch("income");
   entryList($("iList"), L.filter(e => (!listFilter.income || (e.name || "ไม่ระบุหมวด") === listFilter.income) && (!dayPick || e.date === dayPick)), "income");
 }
 
@@ -1505,6 +1534,7 @@ function renderExpense(P){
   }
   const cy = calYM(); $("eCalTitle").textContent = `ปฏิทินรายจ่าย ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("eCal"), cy, pickDay);
+  renderSearch("expense");
   entryList($("eList"), L.filter(e => (!listFilter.expense || (e.name || "ไม่ระบุหมวด") === listFilter.expense) && (!dayPick || e.date === dayPick)), "expense");
 }
 
