@@ -1733,25 +1733,36 @@ $("fundDel").addEventListener("click", () => {
 });
 
 /* ---------- installments ---------- */
+// What is still owed, one row per month: that month's TikTok Pay Later bill (with any installment billed in it)
+// plus every other installment due that month.
 function renderInstallments(box){
   box.textContent = "";
-  const future = entries.filter(e => e.instId && e.date > todayISO);
-  const dues = planDues().filter(d => !d.paid);
-  if (!future.length && !dues.length){ box.append(el("div", "empty", "ไม่มียอดผ่อนค้าง กด \"＋ เพิ่มตารางจ่าย\" ด้านล่างได้เลย")); renderPayPlans(box); return; }
-  const by = new Map();
-  future.forEach(e => { const k = e.account || "ผ่อน"; const v = by.get(k) || {total: 0, next: null, n: 0, plans: new Set()}; v.total += Number(e.amount)||0; v.n++; v.plans.add(e.instId); if (!v.next || e.date < v.next.date) v.next = e; by.set(k, v); });
-  dues.forEach(d => { const k = d.plan.account || "ผ่อน"; const v = by.get(k) || {total: 0, next: null, n: 0, plans: new Set()}; v.total += d.amount; v.n++; v.plans.add(d.plan.id); if (!v.next || d.date < v.next.date) v.next = d; by.set(k, v); });
-  const t = el("table"); const tb = el("tbody");
-  const hd = el("thead"); const hr = el("tr"); ["ผ่อนกับ", "คงเหลือ", "งวดถัดไป"].forEach((x, i) => hr.append(el("th", i === 1 ? "n" : "", x))); hd.append(hr); t.append(hd);
-  let sum = 0;
-  for (const [k, v] of by){
-    sum += v.total;
-    const tr = el("tr");
-    tr.append(el("td", "", `${k} (${v.plans.size} รายการ ${v.n} งวด)`), el("td", "n", fmt(v.total)), el("td", "", `${thaiDate(v.next.date)} · ${fmt(v.next.amount)}`));
-    tb.append(tr);
+  const paid = plPaid(), merged = new Set(), rows = new Map();
+  const add = (date, amount, what) => { const k = date.slice(0, 7), v = rows.get(k) || {date, total: 0, what: []}; if (date < v.date) v.date = date; v.total = c2(v.total + amount); v.what.push(what); rows.set(k, v); };
+  for (const g of plGroups()){
+    (g.inst || []).forEach(d => merged.add(d.plan.id + ":" + d.i));
+    if (paid[g.due]) continue;
+    add(g.due, g.total, `บิล TikTok Pay Later ${g.items.length} รายการ` + (g.inst || []).map(d => ` + ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`).join(""));
   }
+  const tiktokDay = (date, acc) => /tiktok/i.test(acc || "") ? date.slice(0, 8) + "10" : date;
+  entries.filter(e => e.instId && e.date > todayISO).forEach(e => {
+    const [k, n] = String(e.inst || "1/1").split("/").map(Number);
+    if (merged.has("e:" + e.instId + ":" + ((k || 1) - 1))) return;
+    add(tiktokDay(e.date, e.account), Number(e.amount) || 0, `${e.note || e.name || "ผ่อน"} งวด ${e.inst || ""}${e.account ? " · " + e.account : ""}`);
+  });
+  planDues().filter(d => !d.paid && !merged.has(d.plan.id + ":" + d.i)).forEach(d => add(tiktokDay(d.date, d.plan.account), d.amount, `${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}${d.plan.account ? " · " + d.plan.account : ""}`));
+  if (!rows.size){ box.append(el("div", "empty", "ไม่มียอดผ่อนค้าง กด \"＋ เพิ่มตารางจ่าย\" ด้านล่างได้เลย")); renderPayPlans(box); return; }
+  const t = el("table"), tb = el("tbody"), hd = el("thead"), hr = el("tr");
+  ["เดือน", "ต้องจ่าย", "ครบ", "มีอะไรบ้าง"].forEach((x, i) => hr.append(el("th", i === 1 ? "n" : "", x))); hd.append(hr); t.append(hd);
+  let sum = 0;
+  [...rows.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1).forEach(([k, v]) => {
+    sum = c2(sum + v.total);
+    const tr = el("tr");
+    tr.append(el("td", "", `${"ม.ค. ก.พ. มี.ค. เม.ย. พ.ค. มิ.ย. ก.ค. ส.ค. ก.ย. ต.ค. พ.ย. ธ.ค.".split(" ")[+k.slice(5) - 1]} ${k.slice(0, 4)}`), el("td", "n" + (v.date < todayISO ? " neg" : ""), fmt(v.total)), el("td", "", thaiDate(v.date).slice(0, 5)), el("td", "hint", v.what.join(" · ")));
+    tb.append(tr);
+  });
   t.append(tb);
-  const tf = el("tfoot"); const fr = el("tr"); fr.append(el("td", "", "รวม"), el("td", "n", fmt(sum)), el("td")); tf.append(fr); t.append(tf);
+  const tf = el("tfoot"), fr = el("tr"); fr.append(el("td", "", "รวม"), el("td", "n", fmt(sum)), el("td"), el("td")); tf.append(fr); t.append(tf);
   const sc = el("div", "scroll"); sc.append(t); box.append(sc);
   renderPayPlans(box);
 }
