@@ -1008,7 +1008,28 @@ function chips(box, rows, key){
 }
 
 /* ---------- render ---------- */
+// Payment and account chosen for sheet rows live in settings.sheetPay, matched to the row by id or,
+// if the id moved, by its content (one row per record), and are put back on the row each render.
+const sheetPays = () => settings.sheetPay || {};
+function sheetPayApply(){
+  const m = sheetPays(), used = new Set(), rest = [];
+  for (const [id, t] of Object.entries(m)){
+    const e = allEntries.find(x => x.id === id && x.src === "sheet");
+    if (e && !used.has(e)){ used.add(e); e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account; } else rest.push(t);
+  }
+  for (const t of rest){
+    const e = allEntries.find(x => x.src === "sheet" && !used.has(x) && plSame(x, t));
+    if (e){ used.add(e); e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account; }
+  }
+}
+function setSheetPay(orig, upd, pay, account){
+  const m = {...sheetPays()};
+  for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && plSame(orig, t))) delete m[id];
+  if (pay && (pay !== "เงินสด" || account)) m[upd.id] = {...plSnap(upd), pay, ...(account ? {account} : {})};
+  if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+}
 function render(){
+  sheetPayApply();
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
@@ -2452,10 +2473,11 @@ function updateInstHint(){
 }
 
 // Rows typed in the sheet's year tabs are edited in place there; the sheet has no column
-// for the app-only details (who, payment, shop...), so those fields are hidden for them.
+// for the app-only details (who, shop...), so those fields are hidden for them. Payment and account
+// are kept by the app instead (settings.sheetPay), see sheetPayApply.
 function sheetMode(e){
   const on = !!(e && e.src === "sheet");
-  ["kindSeg", "snapBox", "bizField", "shopField", "payRow", "instRow", "whoField", "unitField"].forEach(id => { if (on) $(id).hidden = true; });
+  ["kindSeg", "snapBox", "bizField", "shopField", "instRow", "whoField", "unitField"].forEach(id => { if (on) $(id).hidden = true; });
   if (!on){ ["kindSeg", "payRow", "whoField", "unitField"].forEach(id => $(id).hidden = false); if (readReceipt) $("snapBox").hidden = false; }
   $("sheetNote").hidden = !on;
   if (on) $("sheetNote").textContent = `รายการนี้อยู่ในชีต แท็บ ${e.tab || "ปี"} แถว ${e.row || "?"} แก้แล้วแอปจะเขียนกลับไปที่แถวเดิมในชีตให้`;
@@ -2550,7 +2572,11 @@ $("entryForm").addEventListener("submit", async ev => {
     if (kind === "saving"){ upd.side = base.side; upd.group = base.group; }
     else { upd.note = base.note || ""; if (base.unitPrice) upd.unitPrice = base.unitPrice; if (base.qty) upd.qty = base.qty; }
     if (base.size){ upd.size = base.size; upd.sizeUnit = base.sizeUnit; } else { delete upd.size; delete upd.sizeUnit; }
-    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    if (kind !== "saving"){
+      if (base.pay === TCT){ toast("รายการที่อยู่ในชีตใช้ \"ไทยช่วยไทย\" ไม่ได้ เลือกช่องทางจ่ายอื่นนะคะ", true); return; }
+      upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
+    }
+    try { await store.sheetEdit(editing, upd); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd, upd.pay, upd.account); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
