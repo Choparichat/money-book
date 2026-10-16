@@ -89,6 +89,9 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;gap:12px;min-width:0;align-content:start}
 .srch input{width:100%;font-size:16px}
 .srch-sum{margin:10px 0 6px}
+.srch-row{cursor:pointer}
+.srch-row:hover td{background:var(--surface-2,rgba(255,255,255,.04))}
+.srch-row.on td{background:var(--sav-soft);color:var(--sav);font-weight:600}
 .srch table{margin-bottom:8px}
 .panel-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center}
 .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
@@ -935,25 +938,31 @@ function makeDraggable(block, day, key){
 }
 // Search every entry of this kind, all years: each word typed must appear in the category, detail, shop,
 // account or other text of the entry. Shows a count, total, what was bought most, then the entries.
+const srchPick = {income: "", expense: ""}, srchQ = {income: "", expense: ""};
 function renderSearch(kind){
   const k = kind === "income" ? "i" : "e", q = $(k + "Search").value.trim().toLowerCase(), out = $(k + "SearchOut");
-  out.textContent = ""; if (!q) return;
+  out.textContent = ""; if (!q){ srchPick[kind] = ""; return; }
+  if (srchQ[kind] !== q){ srchQ[kind] = q; srchPick[kind] = ""; }
   const words = q.split(/\s+/);
   const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit].filter(Boolean).join(" ").toLowerCase();
   const hits = entries.filter(e => e.kind === kind && (h => words.every(w => h.includes(w)))(hay(e)));
   const total = c2(hits.reduce((a, e) => a + (Number(e.amount) || 0), 0));
   out.append(el("p", "hint srch-sum", hits.length ? `พบ ${hits.length} รายการ · รวม ${fmt(total)} บาท${hits.length ? ` · ${thaiDate(hits.reduce((a, e) => e.date < a ? e.date : a, hits[0].date))} ถึง ${thaiDate(hits.reduce((a, e) => e.date > a ? e.date : a, hits[0].date))}` : ""}` : "ไม่พบรายการที่ตรงกับคำค้น"));
   if (!hits.length) return;
-  const by = new Map();
-  hits.forEach(e => { const n = e.note || e.name || "ไม่ระบุ", v = by.get(n) || {n: 0, t: 0, last: ""}; v.n++; v.t = c2(v.t + (Number(e.amount) || 0)); if (e.date > v.last) v.last = e.date; by.set(n, v); });
+  const by = new Map(), itemOf = e => e.note || e.name || "ไม่ระบุ";
+  hits.forEach(e => { const n = itemOf(e), v = by.get(n) || {n: 0, t: 0, last: ""}; v.n++; v.t = c2(v.t + (Number(e.amount) || 0)); if (e.date > v.last) v.last = e.date; by.set(n, v); });
+  const pick = by.has(srchPick[kind]) ? srchPick[kind] : "";
   if (by.size > 1){
     const t = el("table"), hd = el("thead"), hr = el("tr"), tb = el("tbody");
     ["รายการ", "กี่ครั้ง", "รวม", "ล่าสุด"].forEach((x, i) => hr.append(el("th", i === 1 || i === 2 ? "n" : "", x))); hd.append(hr); t.append(hd);
-    [...by].sort((a, b) => b[1].t - a[1].t).slice(0, 10).forEach(([n, v]) => { const tr = el("tr"); tr.append(el("td", "", n), el("td", "n", String(v.n)), el("td", "n", fmt(v.t)), el("td", "", thaiDate(v.last))); tb.append(tr); });
+    [...by].sort((a, b) => b[1].t - a[1].t).slice(0, 10).forEach(([n, v]) => { const tr = el("tr", "srch-row" + (pick === n ? " on" : "")); tr.tabIndex = 0;
+      const tog = () => { srchPick[kind] = pick === n ? "" : n; renderSearch(kind); };
+      tr.addEventListener("click", tog); tr.addEventListener("keydown", ev => { if (ev.key === "Enter") tog(); });
+      tr.append(el("td", "", n), el("td", "n", String(v.n)), el("td", "n", fmt(v.t)), el("td", "", thaiDate(v.last))); tb.append(tr); });
     t.append(tb); const sc = el("div", "scroll"); sc.append(t); out.append(sc);
-    if (by.size > 10) out.append(el("p", "hint", `และอีก ${by.size - 10} อย่าง`));
+    out.append(el("p", "hint", (by.size > 10 ? `และอีก ${by.size - 10} อย่าง · ` : "") + (pick ? `ดูเฉพาะ "${pick}" อยู่ แตะแถวเดิมอีกครั้งเพื่อดูทั้งหมด` : "แตะแถวในตารางเพื่อดูเฉพาะรายการนั้น")));
   }
-  const list = el("div", "list"); out.append(list); entryList(list, hits, "search-" + kind);
+  const list = el("div", "list"); out.append(list); entryList(list, pick ? hits.filter(e => itemOf(e) === pick) : hits, "search-" + kind);
 }
 ["income", "expense"].forEach(kind => { let tm; $((kind === "income" ? "i" : "e") + "Search").addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => renderSearch(kind), 150); }); });
 function entryList(box, list, key){
