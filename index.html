@@ -137,6 +137,7 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 /* lists */
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:1px solid var(--line);border-radius:999px;padding:3px 12px;background:transparent;cursor:pointer;font-size:.85rem}
+.acc-chip{display:inline-block;padding:0 6px;border-radius:6px;font-weight:600;line-height:1.5}
 .chip-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline;box-shadow:0 0 0 1.5px var(--surface)}
 .chip[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .legend li.pickable{cursor:pointer}
@@ -800,6 +801,14 @@ function groupColor(g){
   }
   return colorMaps.grp.get(g) || null;
 }
+// Bank/app accounts get their own colour wherever the name shows (entry tags, บัญชีของฉัน, transfers).
+const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400"};
+const accColor = a => a ? (settings.accColors || {})[a] || ACC_DEF[a] || null : null;
+function accChip(a){
+  const c = accColor(a); if (!c) return document.createTextNode(a);
+  const h = cssHex(c), [r, g, b] = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const x = el("span", "acc-chip", a); x.style.background = h; x.style.color = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#14201a" : "#fff"; return x;
+}
 function cssHex(c){
   if (!c) return "#a3aaa5";
   if (c[0] === "#") return c;
@@ -869,6 +878,7 @@ function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
 }
 
 /* ---------- entry list ---------- */
+function payTag(e){ const t = el("span", "tag"); if (e.pay) t.append(e.pay + " · "); t.append(accChip(e.account)); if (isTct(e)) t.append(payText({...e, pay: "", account: ""})); return t; }
 function payText(e){ return [e.pay, e.account].filter(Boolean).join(" · ") + (isTct(e) ? ` (ราคาเต็ม ${fmt(tctFull(e))} · รัฐออกให้ ${fmt(tctFull(e) - e.amount)})` : ""); }
 // Order inside a day can be set by press-and-hold then drag; kept in synced settings as {day: [keys]}.
 const orderKey = e => e.billId ? "b:" + e.billId : e.id;
@@ -984,11 +994,11 @@ function entryItem(e, inBill){
     // ticked as TikTok Pay Later: say so (with its due date) in place of a plain "cash" or missing payment
     const plt = e.kind === "expense" && plTagOf(e);
     if (plt) tags.push({pl: `💳 TikTok Pay Later · ครบ ${thaiDate(plt[1].due).slice(0, 5)}${plPaid()[plt[1].due] ? " · จ่ายแล้ว" : ""}`});
-    if (payText(e) && !(plt && (!e.pay || e.pay === "เงินสด"))) tags.push(payText(e));
+    if (payText(e) && !(plt && (!e.pay || e.pay === "เงินสด"))) tags.push(e.account && accColor(e.account) ? {pay: e} : payText(e));
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
-    tags.filter(Boolean).forEach(t => s.append(t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
+    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     it.addEventListener("click", () => openForm(e));
@@ -1169,6 +1179,17 @@ function renderCatColors(){
     row.append(inp, el("span", "", n));
     if (gown[n]){ const r = el("button", "btn sm", "ใช้สีเดิม"); r.type = "button"; r.addEventListener("click", () => { const c = {...(settings.groupColors || {})}; delete c[n]; store.setSetting("groupColors", c); }); row.append(r); }
     else if (!groupColor(n)) row.append(el("span", "hint", "ยังไม่มีสี"));
+    box.append(row);
+  }
+  const aown = settings.accColors || {};
+  box.append(el("div", "cc-h", "บัญชี / ช่องทางจ่าย"));
+  for (const n of accList()){
+    const row = el("div", "cc-row");
+    const inp = document.createElement("input"); inp.type = "color"; inp.value = cssHex(accColor(n) || "#888888"); inp.setAttribute("aria-label", "สีของ " + n);
+    inp.addEventListener("change", () => store.setSetting("accColors", {...(settings.accColors || {}), [n]: inp.value}));
+    row.append(inp, accChip(n));
+    if (aown[n]){ const r = el("button", "btn sm", "ใช้สีเดิม"); r.type = "button"; r.addEventListener("click", () => { const c = {...(settings.accColors || {})}; delete c[n]; store.setSetting("accColors", c); }); row.append(r); }
+    else if (!accColor(n)) row.append(el("span", "hint", "ยังไม่มีสี"));
     box.append(row);
   }
 }
@@ -1898,7 +1919,7 @@ function renderAccPanel(P){
     ["บัญชี", "เข้า", "ออก", "สุทธิ"].forEach((x, i) => hr.append(el("th", i ? "n" : "", x))); hd.append(hr); t.append(hd);
     const tb = el("tbody");
     rows.forEach(([k, v]) => { const tr = el("tr", k === "ไม่ระบุ" ? "muted" : ""), net = c2(v.inn - v.out);
-      tr.append(el("td", "", k), el("td", "n", v.inn ? fmt(v.inn) : "–"), el("td", "n", v.out ? fmt(v.out) : "–"), el("td", "n" + (net < 0 ? " neg" : ""), (net < 0 ? "−" : "") + fmt(Math.abs(net)))); tb.append(tr); });
+      const td = el("td"); td.append(accChip(k)); tr.append(td, el("td", "n", v.inn ? fmt(v.inn) : "–"), el("td", "n", v.out ? fmt(v.out) : "–"), el("td", "n" + (net < 0 ? " neg" : ""), (net < 0 ? "−" : "") + fmt(Math.abs(net)))); tb.append(tr); });
     t.append(tb); const sc = el("div", "scroll"); sc.append(t); box.append(sc);
     box.append(el("p", "hint", "เงินที่เข้า-ออกแต่ละบัญชีในช่วงที่เปิดดู รวมการโอนระหว่างบัญชีด้วย แต่การโอนไม่นับเป็นรายรับหรือรายจ่าย"));
   }
@@ -1907,7 +1928,7 @@ function renderAccPanel(P){
     box.append(el("div", "cc-h", `โอนระหว่างบัญชี ${list.length} รายการ`));
     list.forEach(t => {
       const row = el("div", "fu-row"), info = el("div", "fu-open");
-      info.append(el("strong", "", `${fmt(t.amount)} บาท · ${t.account} → ${t.group}`), el("span", "hint", `${thaiDate(t.date)}${t.note ? " · " + t.note : ""}`));
+      const st = el("strong", "", `${fmt(t.amount)} บาท · `); st.append(accChip(t.account), " → ", accChip(t.group)); info.append(st, el("span", "hint", `${thaiDate(t.date)}${t.note ? " · " + t.note : ""}`));
       const del = el("button", "btn sm", "ลบ"); del.type = "button"; let armed = false;
       del.addEventListener("click", async () => {
         if (!armed){ armed = true; del.textContent = "กดอีกครั้ง"; setTimeout(() => { armed = false; del.textContent = "ลบ"; }, 3000); return; }
