@@ -89,6 +89,9 @@ main{max-width:1120px;margin:0 auto;padding:16px 16px 110px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;gap:12px;min-width:0;align-content:start}
 .srch input{width:100%;font-size:16px}
 .srch-sum{margin:10px 0 6px}
+.dn-detail{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.dn-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.legend li.sel{background:var(--sav-soft)}
 .srch-row{cursor:pointer}
 .srch-row:hover td{background:var(--surface-2,rgba(255,255,255,.04))}
 .srch-row.on td{background:var(--sav-soft);color:var(--sav);font-weight:600}
@@ -825,7 +828,28 @@ function cssHex(c){
 }
 
 /* ---------- donut ---------- */
-function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
+// Tapping a name in a donut's legend opens its entries for the period right under the chart
+// (items = the period's entries, key = how they were grouped); "อื่นๆ" lists what it lumps together.
+const donutOpen = {};
+function donutDetail(box, mapKey, label, rest, items, key, rowsAll){
+  const old = box.querySelector(".dn-detail"); if (old) old.remove();
+  if (!label) return;
+  const d = el("div", "dn-detail"), hd = el("div", "dn-head"), close = el("button", "btn sm", "ปิด ✕"); close.type = "button";
+  close.addEventListener("click", () => { delete donutOpen[box.id]; donutDetail(box, mapKey, null); box.querySelectorAll(".legend li").forEach(li => li.classList.remove("sel")); });
+  if (label === "__rest"){
+    hd.append(el("strong", "", `อื่นๆ ${rest.length} รายการ · รวม ${fmt(rest.reduce((a, r) => a + r[1], 0))} บาท`), close); d.append(hd);
+    const t = el("table"), tb = el("tbody");
+    rest.forEach(([n, v]) => { const tr = el("tr", "srch-row"); tr.tabIndex = 0; const go = () => { donutOpen[box.id] = n; donutDetail(box, mapKey, n, rest, items, key, rowsAll); };
+      tr.addEventListener("click", go); tr.addEventListener("keydown", ev => { if (ev.key === "Enter") go(); }); tr.append(el("td", "", n), el("td", "n", fmt(v))); tb.append(tr); });
+    t.append(tb); const sc = el("div", "scroll"); sc.append(t); d.append(sc, el("p", "hint", "แตะชื่อเพื่อดูรายการข้างใน"));
+  } else {
+    const list = items.filter(e => (key(e) || "ไม่ระบุหมวด") === label || key(e) === label), v = (rowsAll.find(r => r[0] === label) || [0, 0])[1];
+    hd.append(el("strong", "", `${label} · ${list.length} รายการ · รวม ${fmt(v)} บาท`), close); d.append(hd);
+    const lb = el("div", "list"); d.append(lb); entryList(lb, list, "dn-" + mapKey);
+  }
+  box.append(d);
+}
+function donut(box, rows, mapKey, allList, key, centerTitle, onPick, items){
   box.textContent = "";
   rows = rows.filter(r => r[1] > 0);
   const total = rows.reduce((a, r) => a + r[1], 0);
@@ -877,6 +901,15 @@ function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
     li.append(dot, el("span", "lb", s.label), el("span", "num", fmt0(s.v)), el("span", "pc num", (s.v/total*100).toFixed(0) + "%"));
     li.title = s.label;
     li.addEventListener("mouseenter", () => hl(i)); li.addEventListener("mouseleave", () => hl(null));
+    const isRest = s.c === "var(--sother)" && i === slices.length - 1 && rest.length;
+    if (!onPick && items && key){
+      const lab = isRest ? "__rest" : s.label;
+      if (donutOpen[box.id] === lab) li.classList.add("sel");
+      const open = () => { const on = donutOpen[box.id] !== lab; if (on) donutOpen[box.id] = lab; else delete donutOpen[box.id];
+        [...legend.children].forEach(x => x.classList.remove("sel")); if (on) li.classList.add("sel"); donutDetail(box, mapKey, on ? lab : null, rest, items, key, rows); };
+      li.classList.add("pickable"); li.tabIndex = 0; li.addEventListener("click", open); li.addEventListener("keydown", ev => { if (ev.key === "Enter") open(); });
+      p.addEventListener("click", open);
+    }
     if (onPick && s.c !== "var(--sother)"){ li.classList.add("pickable"); li.tabIndex = 0; li.addEventListener("click", () => onPick(s.label)); li.addEventListener("keydown", ev => { if (ev.key === "Enter") onPick(s.label); }); }
     legend.append(li);
   });
@@ -884,6 +917,10 @@ function donut(box, rows, mapKey, allList, key, centerTitle, onPick){
   svg.append(c1, c2);
   wrap.append(svg, legend);
   box.append(wrap);
+  if (items && key && donutOpen[box.id]){
+    const o = donutOpen[box.id];
+    if (o === "__rest" ? rest.length : rows.some(r => r[0] === o)) donutDetail(box, mapKey, o, rest, items, key, rows); else delete donutOpen[box.id];
+  }
 }
 
 /* ---------- entry list ---------- */
@@ -1304,7 +1341,7 @@ function renderOverall(P){
   const s = sums(P);
   setNum("oInc", s.inc); setNum("oExp", s.exp); setNum("oBal", s.inc - s.exp, true); setNum("oSav", s.sav);
   const allExp = entries.filter(e => e.kind === "expense");
-  donut($("oPieExp"), totalsBy(P.filter(e => e.kind === "expense"), e => e.name), "expCat", allExp, e => e.name, "รายจ่าย");
+  donut($("oPieExp"), totalsBy(P.filter(e => e.kind === "expense"), e => e.name), "expCat", allExp, e => e.name, "รายจ่าย", null, P.filter(e => e.kind === "expense"));
   const left = s.inc - s.exp - s.sav;
   const flowBox = $("oPieFlow");
   colorMaps.flow = new Map([["รายจ่าย","var(--s2)"],["ออม + ลงทุน","var(--s1)"],["เหลือ","var(--s3)"]]);
@@ -1407,8 +1444,8 @@ function renderIncome(P){
   const months = new Set(yl.map(e => e.date.slice(0,7))).size || 1;
   setNum("iAvg", sums(yl).inc / months);
   const byCat = totalsBy(L, e => e.name);
-  donut($("iPie"), byCat, "incCat", all, e => e.name, "รายรับ");
-  donut($("iPiePay"), totalsBy(L, e => payText(e) || "ไม่ระบุ"), "incPay", all, e => payText(e) || "ไม่ระบุ", "รับเงิน");
+  donut($("iPie"), byCat, "incCat", all, e => e.name, "รายรับ", null, L);
+  donut($("iPiePay"), totalsBy(L, e => payText(e) || "ไม่ระบุ"), "incPay", all, e => payText(e) || "ไม่ระบุ", "รับเงิน", null, L);
   chips($("iChips"), byCat, "income");
   const cy = calYM(); $("iCalTitle").textContent = `ปฏิทินรายรับ ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("iCal"), cy, iso => pickDay(iso, "income"), "income");
@@ -1541,9 +1578,9 @@ function renderExpense(P){
   setNum("eNoShop", sums(L.filter(e => bizOf(e) === PERSONAL)).exp);
   setNum("eInst", sums(L.filter(e => e.instId)).exp);
   const byCat = totalsBy(L, e => e.name);
-  donut($("ePie"), byCat, "expCat", all, e => e.name, "รายจ่าย");
+  donut($("ePie"), byCat, "expCat", all, e => e.name, "รายจ่าย", null, L);
   const payKey = e => e.pay ? (e.pay === "เงินสด" ? "เงินสด" : (e.account || e.pay)) : "ไม่ระบุ";
-  donut($("ePiePay"), totalsBy(L, payKey), "expPay", all, payKey, "จ่ายด้วย");
+  donut($("ePiePay"), totalsBy(L, payKey), "expPay", all, payKey, "จ่ายด้วย", null, L);
   chips($("eChips"), byCat, "expense");
   const tct = L.filter(isTct), tp = $("tctPanel"); tp.hidden = !tct.length;
   if (tct.length){
@@ -1569,7 +1606,7 @@ function renderSaving(P){
   { const t = sums(PL), first = PL.reduce((a, e) => !a || e.date < a ? e.date : a, "");
     $("sPieNote").textContent = sPieAll ? (first ? `ตั้งแต่ ${thaiDate(first)} ถึงวันนี้ · ซื้อ ${fmt(t.buy)} · ขาย ${fmt(t.sell)} · สุทธิ ${fmt(t.sav)} บาท` : "ยังไม่มีรายการ") : periodLabel(); }
   donut($("sPie"), totalsBy(PL, e => e.group, signedSaving), "savGroup", all, e => e.group, "ออม+ลงทุน", g => pickSavGroups([g], g, true));
-  donut($("sPieApp"), totalsBy(PL, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน");
+  donut($("sPieApp"), totalsBy(PL, e => e.name, signedSaving), "savApp", all, e => e.name, "ออม+ลงทุน", null, PL);
   renderFunds($("sFunds"), false);
   { // invested per month this year, and which months had nothing
     const y = curYM.slice(0, 4), yl = all.filter(e => e.date.startsWith(y + "-")), inc = entries.filter(e => e.kind === "income" && e.date.startsWith(y + "-"));
@@ -1674,8 +1711,8 @@ function renderShop(P){
   setNum("mInc", s.inc); setNum("mExp", s.exp); setNum("mNet", s.inc - s.exp, true);
   const X = L.filter(e => e.kind === "expense");
   const itemKey = e => (e.note || e.name || "").trim();
-  donut($("mPieItem"), totalsBy(X, itemKey), "shopItem" + shopBiz, all, itemKey, "ค่าใช้จ่าย");
-  donut($("mPieShop"), totalsBy(X, e => e.shop || "ไม่ระบุร้าน"), "shopFrom" + shopBiz, all, e => e.shop || "ไม่ระบุร้าน", "ค่าใช้จ่าย");
+  donut($("mPieItem"), totalsBy(X, itemKey), "shopItem" + shopBiz, all, itemKey, "ค่าใช้จ่าย", null, X);
+  donut($("mPieShop"), totalsBy(X, e => e.shop || "ไม่ระบุร้าน"), "shopFrom" + shopBiz, all, e => e.shop || "ไม่ระบุร้าน", "ค่าใช้จ่าย", null, X);
   // items bought: quantity, average price per unit, where from
   const items = new Map();
   for (const e of X){
