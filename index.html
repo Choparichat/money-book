@@ -1108,7 +1108,7 @@ function entryItem(e, inBill){
     const tags = [];
     const cc = e.kind === "saving" ? groupColor(e.group) : e.name ? catColor(e.kind, e.name) : null;
     if (cc){ it.classList.add("hascat"); it.style.setProperty("--cat", cc); }
-    if (e.kind !== "saving" && e.note) tags.push({cat: e.name});
+    if (e.kind !== "saving" && e.note && e.name) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
@@ -1551,6 +1551,18 @@ function setSrcs(iso, kind, list){
   else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
   store.setSetting(srcKey(kind), m);
 }
+// several days at once (multi-day ticking on the calendar): one write for all of them
+function setSrcsMany(days, kind, fn){
+  const old = settings[ckKey(kind)] || [], m = {...(settings[srcKey(kind)] || {})};
+  days.forEach(iso => {
+    const list = fn(srcsOf(iso, kind));
+    if (CHECK_SRC.every(s => list.includes(s))) m[iso] = ["*"];
+    else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
+  });
+  if (old.some(d => days.includes(d))) store.setSetting(ckKey(kind), old.filter(d => !days.includes(d)));
+  store.setSetting(srcKey(kind), m);
+}
+let multiDays = null; // Set of picked days while picking several days on the calendar
 function toggleChecked(iso, kind){ setSrcs(iso, kind, isChecked(iso, kind) ? [] : [...CHECK_SRC]); }
 function toggleSrc(iso, kind, src){ const s = new Set(srcsOf(iso, kind)); if (s.has(src)) s.delete(src); else s.add(src); setSrcs(iso, kind, [...s]); }
 // kind "income" shades days by income instead (green, no dot).
@@ -1572,7 +1584,7 @@ function calendar(box, ym, onPick, kind = "expense"){
   for (let i = 0; i < first; i++){ const b = el("button", "blank"); b.type = "button"; b.tabIndex = -1; g.append(b); }
   for (let d = 1; d <= days; d++){
     const iso = `${ym}-${pad(d)}`, v = main.get(d) || 0;
-    const b = el("button", (iso === todayISO ? "today " : "") + (iso === dayPick ? "sel" : "")); b.type = "button";
+    const b = el("button", (iso === todayISO ? "today " : "") + ((multiDays ? multiDays.has(iso) : iso === dayPick) ? "sel" : "")); b.type = "button";
     if (v > 0){ const h = el("span", "heat"); h.style.opacity = (0.1 + 0.45 * v / max).toFixed(2); b.append(h); }
     b.append(el("span", "d", String(d)), el("span", "x", v ? fmt0(v) : ""));
     if (!isInc && inc.get(d)) b.append(el("span", "inc"));
@@ -1590,7 +1602,7 @@ function calendar(box, ym, onPick, kind = "expense"){
     b.addEventListener("pointerdown", () => { held = false; hold = setTimeout(() => { held = true; toggleChecked(iso, kind); }, 550); });
     ["pointerup", "pointerleave", "pointercancel"].forEach(t => b.addEventListener(t, cancel));
     b.addEventListener("contextmenu", ev => ev.preventDefault());
-    b.addEventListener("click", () => { if (held){ held = false; return; } onPick(iso); });
+    b.addEventListener("click", () => { if (held){ held = false; return; } if (multiDays){ if (multiDays.has(iso)) multiDays.delete(iso); else multiDays.add(iso); render(); } else onPick(iso); });
     g.append(b);
   }
   box.append(g);
@@ -1603,7 +1615,29 @@ function calendar(box, ym, onPick, kind = "expense"){
   const nChk = [...days2].filter(d => isChecked(`${ym}-${pad(d)}`, kind)).length;
   const k3 = el("span", "k"); k3.append(el("span", "xk", "✕"), document.createTextNode(`เช็คแล้ว ${nChk}/${days2.size} วัน`));
   foot.append(...(isInc ? [k1, k3] : [k1, k2, k3]), el("span", "", isInc ? `มีรายรับ ${n} วัน · รวม ${fmt0(tot)} บาท` : `ใช้จ่าย ${n} วัน · เฉลี่ยวันละ ${fmt0(n ? tot / days : 0)} บาท`));
-  if (dayPick && dayPick.startsWith(ym)){
+  if (multiDays){
+    const picked = [...multiDays].filter(d => d.startsWith(ym)).sort();
+    const box2 = el("div", "srcchk");
+    box2.append(el("div", "hint", picked.length ? `เลือกไว้ ${picked.length} วัน (${picked.map(d => +d.slice(8)).join(", ")}) · แตะแอปเพื่อติ๊กให้ทุกวันที่เลือก` : "แตะวันที่ในปฏิทินได้หลายวัน แล้วแตะแอปเพื่อติ๊กพร้อมกัน"));
+    const row = el("div", "chips");
+    const btn = (txt, on, fn, dis) => { const t = el("button", "chip" + (on != null ? " chk-btn" + (on ? " on" : "") : ""), txt); t.type = "button"; if (on != null) t.setAttribute("aria-pressed", String(on)); t.disabled = !!dis; t.addEventListener("click", fn); row.append(t); };
+    const allOf = src => picked.length && picked.every(d => srcsOf(d, kind).includes(src));
+    CHECK_SRC.forEach(src => { const on = allOf(src); btn((on ? "✓ " : "☐ ") + src, on, () => setSrcsMany(picked, kind, l => on ? l.filter(x => x !== src) : [...l, src]), !picked.length); });
+    const full = picked.length && picked.every(d => isChecked(d, kind));
+    btn(full ? "ล้างทั้งหมด" : "ติ๊กครบทุกแอป", null, () => setSrcsMany(picked, kind, () => full ? [] : [...CHECK_SRC]), !picked.length);
+    const row2 = el("div", "chips");
+    const b2 = (txt, fn) => { const t = el("button", "chip", txt); t.type = "button"; t.addEventListener("click", fn); row2.append(t); };
+    b2(`เลือกทุกวันที่มี${isInc ? "รายรับ" : "รายการ"}`, () => { [...days2].forEach(d => multiDays.add(`${ym}-${pad(d)}`)); render(); });
+    if (picked.length) b2("ล้างที่เลือก", () => { picked.forEach(d => multiDays.delete(d)); render(); });
+    b2("✓ เสร็จ", () => { multiDays = null; render(); });
+    box2.append(row, row2);
+    foot.append(box2);
+  } else {
+    const t = el("button", "chip", "☑ เลือกหลายวัน"); t.type = "button";
+    t.addEventListener("click", () => { multiDays = new Set(dayPick && dayPick.startsWith(ym) ? [dayPick] : []); dayPick = ""; render(); });
+    foot.append(t);
+  }
+  if (!multiDays && dayPick && dayPick.startsWith(ym)){
     const c = el("button", "chip", `เฉพาะ ${weekday(dayPick)} ${thaiDate(dayPick)} ✕`); c.type = "button"; c.setAttribute("aria-pressed", "true");
     c.addEventListener("click", () => { dayPick = ""; render(); });
     const day = dayPick, have = srcsOf(day, kind), on = have.length >= CHECK_SRC.length;
