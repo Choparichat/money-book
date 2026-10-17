@@ -282,6 +282,12 @@ input,select,textarea{background:var(--bg);border:1px solid var(--line);border-r
 .btn:disabled{opacity:.5;cursor:default}
 label.btn{display:inline-block}
 
+.selbar{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;box-shadow:0 -4px 14px rgba(0,0,0,.2)}
+.selbar .selbtns{display:flex;gap:6px;flex-wrap:wrap}
+.item.selectable{padding-left:44px;position:relative}
+.item.selectable::before{content:"";position:absolute;left:14px;top:50%;width:18px;height:18px;margin-top:-9px;border:2px solid var(--muted);border-radius:5px}
+.item.selectable.picked::before{background:var(--accent);border-color:var(--accent)}
+.item.selectable.picked{background:var(--sav-soft)}
 .fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));z-index:6;border:0;border-radius:999px;background:var(--accent);color:var(--accent-fg);padding:14px 20px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer;font-size:1rem}
 dialog{border:1px solid var(--line);border-radius:16px;padding:0;background:var(--surface);color:var(--fg);width:min(560px,calc(100vw - 16px));max-height:calc(100dvh - 16px)}
 dialog::backdrop{background:rgba(0,0,0,.45)}
@@ -412,7 +418,7 @@ details summary{cursor:pointer;font-weight:500}
     </div>
     <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (รัฐออก 60% ไม่เกินวันละ 200 บาท)</h2><p class="hint" style="margin:0" id="tctSum"></p></div>
     <div class="panel"><div class="panel-head"><h2 id="eCalTitle">ปฏิทินรายจ่าย</h2><span class="hint">แตะวันที่เพื่อดูรายการของวันนั้น</span></div><div id="eCal"></div></div>
-    <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
+    <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><button class="btn sm" type="button" id="eSelBtn">☑ เลือกรวมเป็นบิล</button><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
   </section>
 
   <!-- SAVING -->
@@ -552,6 +558,7 @@ details summary{cursor:pointer;font-weight:500}
 </main>
 
 <button class="fab" type="button" id="fab">＋ เพิ่มรายการ</button>
+<div class="selbar" id="selBar" hidden><span id="selInfo"></span><div class="selbtns"><button class="btn primary sm" type="button" id="selMerge">รวมเป็นบิลเดียว</button><button class="btn sm" type="button" id="selSplit">แยกออกจากบิล</button><button class="btn sm" type="button" id="selCancel">เสร็จ</button></div></div>
 
 <dialog id="dlg" aria-labelledby="formTitle">
   <form id="entryForm" autocomplete="off" method="dialog">
@@ -1039,7 +1046,7 @@ function entryList(box, list, key){
       hd.append(ht, el("span", "num", "รวม " + fmt(net)));
       hd.classList.add("tap"); hd.tabIndex = 0; hd.setAttribute("role", "button"); hd.title = "แตะเพื่อแก้ทั้งบิล";
       const bid = e.billId;
-      hd.addEventListener("click", () => openBill(bid)); hd.addEventListener("keydown", ev => { if (ev.key === "Enter") openBill(bid); });
+      hd.addEventListener("click", () => { if (selMode){ items.forEach(x => selIds.add(x.id)); render(); } else openBill(bid); }); hd.addEventListener("keydown", ev => { if (ev.key === "Enter") openBill(bid); });
       // one framed box per bill, so an item bought separately that day never looks like part of it
       const grp = el("div", "billgrp"); grp.append(hd);
       items.forEach(x => grp.append(entryItem(x, true)));
@@ -1056,6 +1063,42 @@ function entryList(box, list, key){
     box.append(b);
   }
 }
+/* ---------- group separate rows into one bill (tick, then merge) ---------- */
+let selMode = false, selIds = new Set();
+function toggleSel(e, it){ if (selIds.has(e.id)) selIds.delete(e.id); else selIds.add(e.id); it.classList.toggle("picked", selIds.has(e.id)); selBar(); }
+function selBar(){
+  $("selBar").hidden = !selMode; $("fab").hidden = selMode; $("eSelBtn").textContent = selMode ? "✓ เสร็จ" : "☑ เลือกรวมเป็นบิล";
+  if (!selMode) return;
+  const L = entries.filter(e => selIds.has(e.id));
+  $("selInfo").textContent = L.length ? `เลือก ${L.length} รายการ · ${fmt(L.reduce((a, e) => a + (Number(e.amount) || 0), 0))} บาท` : "แตะรายการที่อยู่บิลเดียวกัน";
+  $("selMerge").disabled = L.length < 2; $("selSplit").disabled = !L.some(e => e.billId);
+}
+async function setBill(list, billId){
+  const app = list.filter(e => e.src !== "sheet").map(e => { const x = {...e, updatedAt: new Date().toISOString()}; if (billId) x.billId = billId; else delete x.billId; return x; });
+  // rows from the sheet keep the bill in the app's own notes about them, the sheet is not touched
+  const rows = list.filter(e => e.src === "sheet");
+  if (rows.length){
+    const m = rows.reduce((m, e) => setSheetPay({...e, amount: sheetAmt(e)}, {...e, billId: billId || ""}, m), {...sheetPays()});
+    // a dropped record leaves nothing to put back, so take the bill off the row itself too
+    if (!billId) rows.forEach(e => { const live = allEntries.find(x => x.id === e.id && x.src === "sheet"); if (live) delete live.billId; });
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  if (app.length) await store.save(app);
+}
+$("eSelBtn").addEventListener("click", () => { selMode = !selMode; selIds = new Set(); render(); });
+$("selCancel").addEventListener("click", () => { selMode = false; selIds = new Set(); render(); });
+$("selMerge").addEventListener("click", async () => {
+  const L = entries.filter(e => selIds.has(e.id));
+  if (new Set(L.map(e => e.date)).size > 1){ alert("รายการที่จะรวมเป็นบิลเดียวต้องเป็นวันเดียวกันค่ะ"); return; }
+  const id = (L.find(e => e.billId) || {}).billId || "b" + Date.now().toString(36);
+  try { await setBill(L, id); selMode = false; selIds = new Set(); render(); } catch (err){ alert(err.message); }
+});
+$("selSplit").addEventListener("click", async () => {
+  const L = entries.filter(e => selIds.has(e.id) && e.billId);
+  // a bill left with one item is no longer a bill
+  new Set(L.map(e => e.billId)).forEach(id => { const left = entries.filter(e => e.billId === id && !selIds.has(e.id)); if (left.length === 1) L.push(left[0]); });
+  try { await setBill(L, ""); selMode = false; selIds = new Set(); render(); } catch (err){ alert(err.message); }
+});
 function entryItem(e, inBill){
     const it = el("div", "item" + (e.date > todayISO ? " future" : "") + (inBill ? " inbill" : ""));
     it.tabIndex = 0;
@@ -1084,7 +1127,8 @@ function entryItem(e, inBill){
     tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
-    it.addEventListener("click", () => openForm(e));
+    if (selMode && e.kind === "expense"){ it.classList.add("selectable"); if (selIds.has(e.id)) it.classList.add("picked"); }
+    it.addEventListener("click", () => selMode && e.kind === "expense" ? toggleSel(e, it) : openForm(e));
     it.addEventListener("keydown", ev => { if (ev.key === "Enter") openForm(e); });
     return it;
 }
@@ -1105,7 +1149,7 @@ function chips(box, rows, key){
 // if the id moved, by its content (one row per record), and are put back on the row each render.
 const sheetPays = () => settings.sheetPay || {};
 // app-only details kept for a sheet row: pay and account always, the rest only once they were set ("" = cleared)
-const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer"];
+const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer", "billId"];
 // A sheet row paid with ไทยช่วยไทย keeps the full price in the sheet; the app counts only our share
 // (t.ours) and remembers the government's (t.gov). sheetAmount is what the sheet itself says.
 const sheetAmt = e => e.sheetAmount != null ? e.sheetAmount : Number(e.amount);
@@ -1113,7 +1157,7 @@ const sheetSame = (x, t) => plSame({...x, amount: sheetAmt(x)}, t);
 function sheetPayPut(e, t){
   if (e.sheetAmount == null) e.sheetAmount = Number(e.amount);
   if (t.pay === TCT && t.ours != null){ e.amount = t.ours; e.tctGov = t.gov; } else { e.amount = e.sheetAmount; delete e.tctGov; }
-  e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account;
+  if (t.pay) e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account;
   SHEET_EXTRA.forEach(k => { if (k in t){ if (t[k]) e[k] = t[k]; else delete e[k]; } });
 }
 function sheetPayApply(){
@@ -1127,16 +1171,18 @@ function sheetPayApply(){
     if (e){ used.add(e); sheetPayPut(e, t); }
   }
 }
-function setSheetPay(orig, upd){
-  const m = {...sheetPays()};
+function setSheetPay(orig, upd, into){
+  const m = into || {...sheetPays()};
   for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && sheetSame(orig, t))) delete m[id];
   const rec = {...plSnap(upd), amount: sheetAmt(upd), pay: upd.pay || "", ...(upd.account ? {account: upd.account} : {}), ...(upd.pay === TCT && upd.tctGov != null ? {ours: upd.amount, gov: upd.tctGov} : {})};
   SHEET_EXTRA.forEach(k => rec[k] = upd[k] || "");
-  if (rec.pay && (rec.pay !== "เงินสด" || rec.account || rec.ours != null || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
-  if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  if ((rec.pay || rec.billId) && (rec.pay !== "เงินสด" || rec.account || rec.ours != null || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
+  if (!into && JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  return m;
 }
 function render(){
   sheetPayApply();
+  selBar();
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
@@ -2711,6 +2757,7 @@ $("entryForm").addEventListener("submit", async ev => {
     if (kind !== "saving"){
       upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
       SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
+      if (editing.billId) upd.billId = editing.billId;
     }
     const same = (a, b) => String(a ?? "") === String(b ?? ""), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note", "unitPrice", "qty"];
     const touched = Number(upd.amount) !== Number(was.amount) || sheetCols.some(k => !same(upd[k], editing[k]));
@@ -2848,6 +2895,8 @@ let billEdit = null;
 function openBill(billId){
   const items = entries.filter(x => x.billId === billId).sort((a, b) => (a.id < b.id ? -1 : 1));
   if (!items.length) return;
+  // a bill made by grouping rows from the sheet: rows stay as they are, so offer to ungroup instead
+  if (items.some(x => x.src === "sheet")){ selMode = true; selIds = new Set(items.map(x => x.id)); render(); return; }
   const f = items[0];
   openForm(null);
   setKind("expense", true);
