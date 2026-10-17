@@ -462,6 +462,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="tile exp"><span class="k">ค่าใช้จ่ายร้าน</span><span class="v num" id="mExp">0</span></div>
       <div class="tile bal"><span class="k">กำไร/ขาดทุน</span><span class="v num" id="mNet">0</span></div>
     </div>
+    <div class="panel"><h2>รายรับเข้าบัญชีไหน</h2><div id="mPieIncAcc"></div><p class="hint" id="mIncAccNote" style="margin:6px 0 0" hidden></p></div>
     <div class="grid2">
       <div class="panel"><h2>ซื้ออะไรบ้าง</h2><div id="mPieItem"></div></div>
       <div class="panel"><h2>ซื้อจากร้านไหน</h2><div id="mPieShop"></div></div>
@@ -786,6 +787,7 @@ const colorMaps = {};
 function colorFor(mapKey, list, key, label){
   if (mapKey === "expCat" || mapKey === "incCat") return catColor(mapKey === "expCat" ? "expense" : "income", label);
   if (mapKey === "savGroup") return groupColor(label);
+  if (mapKey === "accInc" && (accColor(label) || label === "เงินสด")) return accColor(label) || "#b9c2bc";
   if (!colorMaps[mapKey]) colorMaps[mapKey] = new Map((key ? totalsBy(list, key).slice(0,8) : []).map(([k], i) => [k, `var(--s${i+1})`]));
   return colorMaps[mapKey].get(label);
 }
@@ -1718,6 +1720,13 @@ function renderShop(P){
   setNum("mInc", s.inc); setNum("mExp", s.exp); setNum("mNet", s.inc - s.exp, true);
   const X = L.filter(e => e.kind === "expense");
   const itemKey = e => (e.note || e.name || "").trim();
+  { // shop income by the account it came in to
+    const I = L.filter(e => e.kind === "income"), accKey = e => e.account || (e.pay === "เงินสด" ? "เงินสด" : "ไม่ระบุบัญชี");
+    donut($("mPieIncAcc"), totalsBy(I, accKey), "accInc", entries.filter(e => e.kind === "income" && bizOf(e) === shopBiz), accKey, "รายรับร้าน", null, I);
+    const nn = I.filter(e => accKey(e) === "ไม่ระบุบัญชี");
+    $("mIncAccNote").hidden = !nn.length;
+    $("mIncAccNote").textContent = `มี ${nn.length} รายการ (${fmt(nn.reduce((a, e) => a + (Number(e.amount) || 0), 0))} บาท) ที่ยังไม่ได้ใส่ว่าเข้าบัญชีไหน แตะ "ไม่ระบุบัญชี" ในวงกลมเพื่อดูแล้วกดแก้ได้`;
+  }
   donut($("mPieItem"), totalsBy(X, itemKey), "shopItem" + shopBiz, all, itemKey, "ค่าใช้จ่าย", null, X);
   donut($("mPieShop"), totalsBy(X, e => e.shop || "ไม่ระบุร้าน"), "shopFrom" + shopBiz, all, e => e.shop || "ไม่ระบุร้าน", "ค่าใช้จ่าย", null, X);
   // items bought: quantity, average price per unit, where from
