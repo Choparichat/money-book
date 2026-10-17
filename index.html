@@ -672,7 +672,7 @@ const DEF = {
 const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4, TCT_CAP = 200;
 const isTct = e => e && e.kind === "expense" && e.pay === TCT;
 const c2 = v => Math.round(v * 100) / 100;
-const tctGovOf = e => { const m = (settings.tctGov || {})[e.id]; return m != null ? Number(m) : c2((Number(e.amount) || 0) / TCT_OURS * (1 - TCT_OURS)); };
+const tctGovOf = e => { const m = e.tctGov != null ? e.tctGov : (settings.tctGov || {})[e.id]; return m != null ? Number(m) : c2((Number(e.amount) || 0) / TCT_OURS * (1 - TCT_OURS)); };
 const tctFull = e => c2((Number(e.amount) || 0) + tctGovOf(e));
 // government money already used on that day by other ไทยช่วยไทย entries
 const tctUsed = (date, skip = []) => c2(entries.filter(e => isTct(e) && e.date === date && !skip.includes(e.id)).reduce((a, e) => a + tctGovOf(e), 0));
@@ -1106,7 +1106,13 @@ function chips(box, rows, key){
 const sheetPays = () => settings.sheetPay || {};
 // app-only details kept for a sheet row: pay and account always, the rest only once they were set ("" = cleared)
 const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer"];
+// A sheet row paid with ไทยช่วยไทย keeps the full price in the sheet; the app counts only our share
+// (t.ours) and remembers the government's (t.gov). sheetAmount is what the sheet itself says.
+const sheetAmt = e => e.sheetAmount != null ? e.sheetAmount : Number(e.amount);
+const sheetSame = (x, t) => plSame({...x, amount: sheetAmt(x)}, t);
 function sheetPayPut(e, t){
+  if (e.sheetAmount == null) e.sheetAmount = Number(e.amount);
+  if (t.pay === TCT && t.ours != null){ e.amount = t.ours; e.tctGov = t.gov; } else { e.amount = e.sheetAmount; delete e.tctGov; }
   e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account;
   SHEET_EXTRA.forEach(k => { if (k in t){ if (t[k]) e[k] = t[k]; else delete e[k]; } });
 }
@@ -1117,16 +1123,16 @@ function sheetPayApply(){
     if (e && !used.has(e)){ used.add(e); sheetPayPut(e, t); } else rest.push(t);
   }
   for (const t of rest){
-    const e = allEntries.find(x => x.src === "sheet" && !used.has(x) && plSame(x, t));
+    const e = allEntries.find(x => x.src === "sheet" && !used.has(x) && sheetSame(x, t));
     if (e){ used.add(e); sheetPayPut(e, t); }
   }
 }
 function setSheetPay(orig, upd){
   const m = {...sheetPays()};
-  for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && plSame(orig, t))) delete m[id];
-  const rec = {...plSnap(upd), pay: upd.pay || "", ...(upd.account ? {account: upd.account} : {})};
+  for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && sheetSame(orig, t))) delete m[id];
+  const rec = {...plSnap(upd), amount: sheetAmt(upd), pay: upd.pay || "", ...(upd.account ? {account: upd.account} : {}), ...(upd.pay === TCT && upd.tctGov != null ? {ours: upd.amount, gov: upd.tctGov} : {})};
   SHEET_EXTRA.forEach(k => rec[k] = upd[k] || "");
-  if (rec.pay && (rec.pay !== "เงินสด" || rec.account || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
+  if (rec.pay && (rec.pay !== "เงินสด" || rec.account || rec.ours != null || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
   if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
 }
 function render(){
@@ -2696,19 +2702,22 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "expense" && base.pay === TCT){ const sp = tctSplit(amount, tctUsed(date, editing ? [editing.id] : [])); base.amount = sp.ours; govNow = sp.gov; }
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด" && base.pay !== TCT) base.account = acc;
   if (editing?.src === "sheet"){
-    const upd = {...editing, date, ym: ymOf(date), name, amount};
+    const was = {...editing, amount: sheetAmt(editing)}; // as the sheet has it
+    const upd = {...editing, date, ym: ymOf(date), name, amount}; delete upd.tctGov; delete upd.sheetAmount;
     ["unitPrice", "qty"].forEach(k => delete upd[k]);
     if (kind === "saving"){ upd.side = base.side; upd.group = base.group; }
     else { upd.note = base.note || ""; if (base.unitPrice) upd.unitPrice = base.unitPrice; if (base.qty) upd.qty = base.qty; }
     if (base.size){ upd.size = base.size; upd.sizeUnit = base.sizeUnit; } else { delete upd.size; delete upd.sizeUnit; }
     if (kind !== "saving"){
-      if (base.pay === TCT){ toast("รายการที่อยู่ในชีตใช้ \"ไทยช่วยไทย\" ไม่ได้ เลือกช่องทางจ่ายอื่นนะคะ", true); return; }
       upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
       SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
     }
     const same = (a, b) => String(a ?? "") === String(b ?? ""), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note", "unitPrice", "qty"];
-    const touched = Number(upd.amount) !== Number(editing.amount) || sheetCols.some(k => !same(upd[k], editing[k]));
-    try { await (touched ? store.sheetEdit(editing, upd) : store.sheetLocal(editing, upd)); rememberSizes([upd]); if (kind !== "saving") setSheetPay(editing, upd); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    const touched = Number(upd.amount) !== Number(was.amount) || sheetCols.some(k => !same(upd[k], editing[k]));
+    // the sheet keeps the full price; on screen a ไทยช่วยไทย row counts only what we paid
+    const shown = govNow != null ? {...upd, amount: base.amount, tctGov: govNow, sheetAmount: amount} : upd;
+    // overlay first: saving the row re-renders, and the old overlay would be put back on it
+    try { if (kind !== "saving") setSheetPay(was, {...shown}); await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
