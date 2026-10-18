@@ -1532,6 +1532,18 @@ setTimeout(() => {
   if (Array.isArray(own) && own.length) store.setSetting("checkApps", [...own, ...add.filter(a => !own.includes(a))]);
   store.setSetting("checkAppsAdded", [...done, ...add]);
 }, 0);
+// Days saved before "*" existed were finished when every app of the first list was ticked. That rule also
+// ticked 7-11/ออมสิน/Kept on a day that only had the first list, so turn those old days into "*" once and drop it.
+setTimeout(() => {
+  if (settings.checkSrcV2) return;
+  for (const kind of ["expense", "income"]){
+    const m = settings[srcKey(kind)]; if (!m) continue;
+    const n = {...m}; let ch = false;
+    for (const [d, l] of Object.entries(n)) if (!l.includes("*") && FIRST_SRC.every(s => l.includes(s))){ n[d] = ["*"]; ch = true; }
+    if (ch) store.setSetting(srcKey(kind), n);
+  }
+  store.setSetting("checkSrcV2", 1);
+}, 0);
 const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
 const srcKey = kind => kind === "income" ? "checkSrcInc" : "checkSrc";
 function srcsOf(iso, kind){
@@ -1539,7 +1551,7 @@ function srcsOf(iso, kind){
   if ((settings[ckKey(kind)] || []).includes(iso)) return [...CHECK_SRC];
   const l = (settings[srcKey(kind)] || {})[iso] || [];
   // "*" = finished; a day ticked for every app of the first list was finished too
-  if (l.includes("*") || FIRST_SRC.every(s => l.includes(s))) return [...CHECK_SRC];
+  if (l.includes("*") || (!settings.checkSrcV2 && FIRST_SRC.every(s => l.includes(s)))) return [...CHECK_SRC];
   return l.filter(s => CHECK_SRC.includes(s));
 }
 const isChecked = (iso, kind) => srcsOf(iso, kind).length >= CHECK_SRC.length;
@@ -1599,7 +1611,8 @@ function calendar(box, ym, onPick, kind = "expense"){
     // press and hold crosses the day off without opening it
     let hold = null, held = false;
     const cancel = () => clearTimeout(hold);
-    b.addEventListener("pointerdown", () => { held = false; hold = setTimeout(() => { held = true; toggleChecked(iso, kind); }, 550); });
+    // not while picking several days: a slow tap there would tick every app of that day
+    b.addEventListener("pointerdown", () => { held = false; if (!multiDays) hold = setTimeout(() => { held = true; toggleChecked(iso, kind); }, 550); });
     ["pointerup", "pointerleave", "pointercancel"].forEach(t => b.addEventListener(t, cancel));
     b.addEventListener("contextmenu", ev => ev.preventDefault());
     b.addEventListener("click", () => { if (held){ held = false; return; } if (multiDays){ if (multiDays.has(iso)) multiDays.delete(iso); else multiDays.add(iso); render(); } else onPick(iso); });
@@ -1621,8 +1634,9 @@ function calendar(box, ym, onPick, kind = "expense"){
     box2.append(el("div", "hint", picked.length ? `เลือกไว้ ${picked.length} วัน (${picked.map(d => +d.slice(8)).join(", ")}) · แตะแอปเพื่อติ๊กให้ทุกวันที่เลือก` : "แตะวันที่ในปฏิทินได้หลายวัน แล้วแตะแอปเพื่อติ๊กพร้อมกัน"));
     const row = el("div", "chips");
     const btn = (txt, on, fn, dis) => { const t = el("button", "chip" + (on != null ? " chk-btn" + (on ? " on" : "") : ""), txt); t.type = "button"; if (on != null) t.setAttribute("aria-pressed", String(on)); t.disabled = !!dis; t.addEventListener("click", fn); row.append(t); };
-    const allOf = src => picked.length && picked.every(d => srcsOf(d, kind).includes(src));
-    CHECK_SRC.forEach(src => { const on = allOf(src); btn((on ? "✓ " : "☐ ") + src, on, () => setSrcsMany(picked, kind, l => on ? l.filter(x => x !== src) : [...l, src]), !picked.length); });
+    // each app shows on how many picked days it is ticked; tapping adds just that app (or takes it off when every day has it)
+    const nOf = src => picked.filter(d => srcsOf(d, kind).includes(src)).length;
+    CHECK_SRC.forEach(src => { const n = nOf(src), on = !!picked.length && n === picked.length; btn((on ? "✓ " : "☐ ") + src + (n && !on ? ` (${n}/${picked.length})` : ""), on, () => setSrcsMany(picked, kind, l => on ? l.filter(x => x !== src) : [...new Set([...l, src])]), !picked.length); });
     const full = picked.length && picked.every(d => isChecked(d, kind));
     btn(full ? "ล้างทั้งหมด" : "ติ๊กครบทุกแอป", null, () => setSrcsMany(picked, kind, () => full ? [] : [...CHECK_SRC]), !picked.length);
     const row2 = el("div", "chips");
