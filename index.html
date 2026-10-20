@@ -199,7 +199,7 @@ table.ledger tr.future td{opacity:.6}
 .billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
 .billrow .num{white-space:nowrap}
 .item.inbill{padding-left:16px}
-.item.hascat{box-shadow:inset 3px 0 0 var(--bar,var(--cat));padding-left:10px}.item.inbill.hascat{padding-left:16px}
+.item.hascat{box-shadow:inset 3px 0 0 var(--cat);padding-left:10px}.item.inbill.hascat{padding-left:16px}
 .tag.cat{background:color-mix(in srgb,var(--cat) 18%,var(--sunk));color:var(--fg)}
 .tag.cat::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cat);margin-right:4px;vertical-align:1px}
 .cc{display:grid;gap:2px}.cc-h{font-weight:600;font-size:.85rem;margin-top:8px}
@@ -1110,7 +1110,8 @@ function entryItem(e, inBill){
     if (cc){ it.classList.add("hascat"); it.style.setProperty("--cat", cc); }
     // income from a delivery app (Grab, Line Man...) wears that app's colour on its left bar
     const bar = e.kind === "income" && accColor(e.payer);
-    if (bar){ it.classList.add("hascat"); it.style.setProperty("--bar", cssHex(bar)); }
+    // ...and on its category badge, so "ยอดขาย" reads Grab green or Line Man green
+    if (bar){ it.classList.add("hascat"); it.style.setProperty("--cat", cssHex(bar)); }
     if (e.kind !== "saving" && e.note && e.name) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
