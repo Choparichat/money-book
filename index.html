@@ -199,7 +199,7 @@ table.ledger tr.future td{opacity:.6}
 .billrow{display:flex;justify-content:space-between;gap:8px;padding:8px 4px 4px;font-size:.85rem;font-weight:600;border-bottom:1px dashed var(--line)}
 .billrow .num{white-space:nowrap}
 .item.inbill{padding-left:16px}
-.item.hascat{box-shadow:inset 3px 0 0 var(--cat);padding-left:10px}.item.inbill.hascat{padding-left:16px}
+.item.hascat{box-shadow:inset 3px 0 0 var(--bar,var(--cat));padding-left:10px}.item.inbill.hascat{padding-left:16px}
 .tag.cat{background:color-mix(in srgb,var(--cat) 18%,var(--sunk));color:var(--fg)}
 .tag.cat::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cat);margin-right:4px;vertical-align:1px}
 .cc{display:grid;gap:2px}.cc-h{font-weight:600;font-size:.85rem;margin-top:8px}
@@ -823,7 +823,7 @@ function groupColor(g){
   return colorMaps.grp.get(g) || null;
 }
 // Bank/app accounts get their own colour wherever the name shows (entry tags, บัญชีของฉัน, transfers).
-const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7", "Grab": "#00452e", "Line Man": "#b5efc2", "LINE MAN": "#b5efc2", "Lineman": "#b5efc2"};
+const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7", "Grab": "#00452e", "Line Man": "#8ee6a0", "LINE MAN": "#8ee6a0", "Lineman": "#8ee6a0"};
 const accColor = a => a ? (settings.accColors || {})[a] || ACC_DEF[a] || null : null;
 function accChip(a){
   const c = accColor(a); if (!c) return document.createTextNode(a);
@@ -1108,12 +1108,15 @@ function entryItem(e, inBill){
     const tags = [];
     const cc = e.kind === "saving" ? groupColor(e.group) : e.name ? catColor(e.kind, e.name) : null;
     if (cc){ it.classList.add("hascat"); it.style.setProperty("--cat", cc); }
+    // income from a delivery app (Grab, Line Man...) wears that app's colour on its left bar
+    const bar = e.kind === "income" && accColor(e.payer);
+    if (bar){ it.classList.add("hascat"); it.style.setProperty("--bar", cssHex(bar)); }
     if (e.kind !== "saving" && e.note && e.name) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
     if (e.time) tags.push(`เวลา ${e.time} น.`);
-    if (e.payer) tags.push(accColor(e.payer) ? {payer: e.payer} : "จาก " + e.payer);
+    if (e.payer) tags.push("จาก " + e.payer);
     { const z = sizeOf(e); if (z){ const c = costPer(e); tags.push(`${z.size} ${z.unit}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); } }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
@@ -1124,7 +1127,7 @@ function entryItem(e, inBill){
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
-    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.payer ? (x => (x.append("จาก ", accChip(t.payer)), x))(el("span", "tag")) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
+    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     if (selMode && e.kind === "expense"){ it.classList.add("selectable"); if (selIds.has(e.id)) it.classList.add("picked"); }
