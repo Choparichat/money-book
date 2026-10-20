@@ -3337,7 +3337,7 @@ function initStore(){
         try { const v = await call({ops: []}); ls.set("money-book-script", v.version || 0); probe = ` · ทดสอบส่งเปล่าผ่าน (สคริปต์รุ่น ${v.version || "เก่า"}) ส่ง ${q.length - bad.length}/${q.length} รายการได้`; }
         catch { probe = " · ทดสอบส่งเปล่าก็ไม่ผ่าน: สคริปต์รับการบันทึกไม่ได้เลย"; }
       }
-      if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 5) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะส่งได้เอง";
+      if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 6) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะบอกได้ว่าติดตรงไหน";
       ls.set("money-book-bad", bad.map(([x, why]) => ({seq: x.seq, why})));
       if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ${probe} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ (ดูรายการที่ค้างได้ที่หน้าตั้งค่า)`, true);
     }
