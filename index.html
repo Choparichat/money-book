@@ -1521,15 +1521,20 @@ function renderIncome(P){
 // Days crossed off before the list existed count as all ticked.
 // The app list is editable in ตั้งค่า. A finished day is stored as "*" so adding an app later keeps it finished.
 const FIRST_SRC = ["Make by KBank", "TikTok", "Shopee", "Lazada", "SCB", "Next", "ไทยช่วยไทย"];
-const DEF_SRC = [...FIRST_SRC, "7-11", "ออมสิน"];
+const DEF_SRC = ["Make by KBank", "KBank", ...FIRST_SRC.slice(1), "7-11", "ออมสิน"];
 let CHECK_SRC = [...DEF_SRC];
 const loadSrcs = () => { CHECK_SRC = Array.isArray(settings.checkApps) && settings.checkApps.length ? settings.checkApps : [...DEF_SRC]; };
 // apps added to the default list later also join a list already edited in ตั้งค่า (once each)
 setTimeout(() => {
   const own = settings.checkApps, done = settings.checkAppsAdded || [];
-  const add = ["ออมสิน"].filter(a => !done.includes(a));
+  const add = ["ออมสิน", "KBank"].filter(a => !done.includes(a));
   if (!add.length) return;
-  if (Array.isArray(own) && own.length) store.setSetting("checkApps", [...own, ...add.filter(a => !own.includes(a))]);
+  if (Array.isArray(own) && own.length){
+    const l = [...own];
+    // KBank (the bank app) sits next to Make by KBank, a separate account
+    add.filter(a => !l.includes(a)).forEach(a => { const i = a === "KBank" ? l.indexOf("Make by KBank") : -1; if (i >= 0) l.splice(i + 1, 0, a); else l.push(a); });
+    store.setSetting("checkApps", l);
+  }
   store.setSetting("checkAppsAdded", [...done, ...add]);
 }, 0);
 // Days saved before "*" existed were finished when every app of the first list was ticked. That rule also
