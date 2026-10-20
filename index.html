@@ -791,7 +791,15 @@ function totalsBy(list, key, val = e => Number(e.amount)||0){
 }
 // Colour follows the thing, not its rank this month: slots go to the biggest all-time.
 const colorMaps = {};
+// Income pie: a category earned through a coloured app (ยอดขาย from Grab / Line Man) gets its own slice in that app's colour
+const incPieSplit = {};
+function incPieKey(e){
+  const n = e.name || "ไม่ระบุหมวด";
+  if (!accColor(e.payer)) return n;
+  const k = `${n} · ${e.payer}`; incPieSplit[k] = e.payer; return k;
+}
 function colorFor(mapKey, list, key, label){
+  if (mapKey === "incCat" && incPieSplit[label]) return accColor(incPieSplit[label]);
   if (mapKey === "expCat" || mapKey === "incCat") return catColor(mapKey === "expCat" ? "expense" : "income", label);
   if (mapKey === "savGroup") return groupColor(label);
   if (mapKey === "accInc" && (accColor(label) || label === "เงินสด")) return accColor(label) || "#b9c2bc";
@@ -1509,7 +1517,7 @@ function renderIncome(P){
   const months = new Set(yl.map(e => e.date.slice(0,7))).size || 1;
   setNum("iAvg", sums(yl).inc / months);
   const byCat = totalsBy(L, e => e.name);
-  donut($("iPie"), byCat, "incCat", all, e => e.name, "รายรับ", null, L);
+  donut($("iPie"), totalsBy(L, incPieKey), "incCat", all, incPieKey, "รายรับ", null, L);
   donut($("iPiePay"), totalsBy(L, e => payText(e) || "ไม่ระบุ"), "incPay", all, e => payText(e) || "ไม่ระบุ", "รับเงิน", null, L);
   chips($("iChips"), byCat, "income");
   const cy = calYM(); $("iCalTitle").textContent = `ปฏิทินรายรับ ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
