@@ -282,6 +282,7 @@ input,select,textarea{background:var(--bg);border:1px solid var(--line);border-r
 .btn:disabled{opacity:.5;cursor:default}
 label.btn{display:inline-block}
 
+.syncq{margin-top:8px}.syncq summary{cursor:pointer;font-weight:600}.syncq-row{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}.syncq-row>div{min-width:0;overflow-wrap:anywhere}
 .selbar{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;box-shadow:0 -4px 14px rgba(0,0,0,.2)}
 .selbar .selbtns{display:flex;gap:6px;flex-wrap:wrap}
 .item.selectable{padding-left:44px;position:relative}
@@ -527,7 +528,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="syncKey">รหัสลับ</label><input id="syncKey" type="password" autocomplete="off"></div>
       <div class="actions"><button class="btn primary" type="button" id="syncOn">เชื่อมต่อ</button><button class="btn" type="button" id="syncNow" hidden>ซิงก์ตอนนี้</button><button class="btn" type="button" id="syncOff" hidden>เลิกเชื่อมต่อ</button></div>
       <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่แท็บข้อมูลแอป)</button>
-      <div class="toast" id="syncMsg" role="status"></div>
+      <div class="toast" id="syncMsg" role="status"></div><div id="syncQ"></div>
     </div>
     <div class="panel">
       <h2>บัญชีของฉัน</h2>
@@ -3221,6 +3222,31 @@ function initStore(){
   function status(msg, bad){
     $("storeNote").textContent = msg;
     $("syncMsg").textContent = msg; $("syncMsg").style.color = bad ? "var(--exp)" : "var(--muted)";
+    showQueue();
+  }
+  // ตั้งค่า: what is still waiting to go up, why it failed, and a way to let one go
+  function showQueue(){
+    const box = $("syncQ"); if (!box || !store) return;
+    const P = store.pending(); box.textContent = "";
+    if (!P.length) return;
+    const d = document.createElement("details"); d.className = "syncq";
+    const sm = document.createElement("summary"); sm.textContent = `ดูรายการที่ค้างส่ง (${P.length})`; d.append(sm);
+    const b0 = e => e ? `${e.date || ""} ${e.note || e.name || ""} ${e.amount != null ? Number(e.amount).toLocaleString("th-TH") + " บาท" : ""}`.trim() : "";
+    for (const p of P){
+      const row = document.createElement("div"); row.className = "syncq-row";
+      const t = document.createElement("div");
+      const o = p.op, what = o.op === "sheetEdit" ? `${b0(o.orig)} → ${b0(o.entry)}` : o.op === "put" ? b0(o.entry) : o.op === "sheetDel" ? b0(o.orig) : "";
+      t.innerHTML = ""; const st = document.createElement("strong"); st.textContent = p.name; t.append(st);
+      if (what){ const w = document.createElement("div"); w.className = "hint"; w.textContent = what; t.append(w); }
+      if (p.why){ const w = document.createElement("div"); w.className = "hint"; w.style.color = "var(--exp)"; w.textContent = p.why; t.append(w); }
+      const x = document.createElement("button"); x.type = "button"; x.className = "btn sm"; x.textContent = "ไม่ต้องส่ง";
+      x.addEventListener("click", () => {
+        const warn = o.op === "sheetEdit" || o.op === "sheetDel" ? "การแก้แถวนี้จะไม่ถูกเขียนลงชีต และแอปจะกลับไปแสดงค่าตามชีต (แก้ในชีตเองได้) ยืนยันไหม" : "รายการนี้จะไม่ถูกส่งขึ้นชีต ยืนยันไหม";
+        if (confirm(warn)) store.dropPending(p.seq);
+      });
+      row.append(t, x); d.append(row);
+    }
+    box.append(d);
   }
   function idle(){
     const n = ls.get(Q, []).length;
@@ -3242,7 +3268,14 @@ function initStore(){
     let r;
     try { r = await fetch(c.url, {method:"POST", body: JSON.stringify({...body, key: c.key})}); }
     catch { throw new Error(await whyFailed(c)); }
-    let j; try { j = await r.json(); } catch { const w = await whyFailed(c); throw new Error(/เปิดลิงก์/.test(w) ? "ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้" : w); }
+    const raw = await r.text();
+    let j; try { j = JSON.parse(raw); } catch {
+      // Google's own error page: keep the line that says what went wrong, so it can be shown
+      const said = raw.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+      const hit = (said.match(/(Exception|Error|Exceeded|ข้อผิดพลาด|เกิน|ไม่พบ)[^.。]{0,160}/i) || [])[0];
+      const w = await whyFailed(c);
+      throw new Error((/เปิดลิงก์/.test(w) ? "ลิงก์นี้ไม่ใช่สคริปต์ของแอป หรือยังไม่ได้ตั้งให้ทุกคนเข้าถึงได้" : w) + (hit && hit.trim().length > 15 ? ` [Google: ${hit.trim()}]` : ""));
+    }
     if (!j.ok) throw new Error(ERR[j.error] || j.error || "เชื่อมต่อไม่สำเร็จ");
     if (j.version) ls.set("money-book-script", j.version);
     return j;
@@ -3254,6 +3287,8 @@ function initStore(){
     let q = ls.get(Q, []);
     for (const op of ops){
       if (op.op === "replaceAll") q = [];
+      // only the newest value of a setting needs sending
+      if (op.op === "setting") q = q.filter(o => !(o.op === "setting" && o.key === op.key));
       q.push({...op, seq: ++seq});
     }
     ls.set(Q, q);
@@ -3267,6 +3302,9 @@ function initStore(){
     const noop = o => o.op === "sheetEdit" && o.kind !== "saving" && o.entry && o.orig && same(o.entry.date, o.orig.date) && Number(o.entry.amount) === Number(o.orig.amount)
       && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && same(o.entry.unitPrice, o.orig.unitPrice) && same(o.entry.qty, o.orig.qty);
     if (ls.get(Q, []).some(noop)) ls.set(Q, ls.get(Q, []).filter(o => !noop(o)));
+    // a setting queued several times: keep only its newest value
+    { const q0 = ls.get(Q, []), last = {}; q0.forEach(o => { if (o.op === "setting") last[o.key] = o.seq; });
+      const q1 = q0.filter(o => o.op !== "setting" || last[o.key] === o.seq); if (q1.length < q0.length) ls.set(Q, q1); }
     const q = ls.get(Q, []);
     if (!q.length){ idle(); return; }
     busy = true;
@@ -3292,10 +3330,14 @@ function initStore(){
       } else bad = [[q[0], err.message]];
       let [o, m] = bad[0] || [q[0], err.message];
       // the script before version 5 crashes when a sheet cell's dropdown refuses the new value; the new one copes
+      // ask the script which version it is (an empty call), so an old script is named as the cause
+      if (/ผิดพลาดระหว่างบันทึก/.test(m)){ try { const v = await call({ops: []}); ls.set("money-book-script", v.version || 0); } catch {} }
       if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 5) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะส่งได้เอง";
-      if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ`, true);
+      ls.set("money-book-bad", bad.map(([x, why]) => ({seq: x.seq, why})));
+      if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ (ดูรายการที่ค้างได้ที่หน้าตั้งค่า)`, true);
     }
     finally { busy = false; }
+    if (clean) ls.del("money-book-bad");
     if (ok){ if (!ls.get(Q, []).length) idle(); else if (clean) flush(); }
   }
   async function pull(){
@@ -3348,6 +3390,10 @@ function initStore(){
     async sheetLocal(orig, upd){ const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
     async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); touch([orig.id]); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
     async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); touch([orig.id]); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
+    // what is still waiting to go to the sheet, with why it failed last time
+    pending(){ const why = new Map(ls.get("money-book-bad", []).map(b => [b.seq, b.why])); return ls.get(Q, []).map(o => ({seq: o.seq, name: opName(o), op: o, why: why.get(o.seq) || ""})); },
+    dropPending(seqNo){ ls.set(Q, ls.get(Q, []).filter(o => o.seq !== seqNo)); ls.set("money-book-bad", ls.get("money-book-bad", []).filter(b => b.seq !== seqNo)); if (!ls.get(Q, []).length){ ls.del("money-book-bad"); pull(); } else flush(); },
+    retry(){ flush(); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   };
