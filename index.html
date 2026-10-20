@@ -823,7 +823,7 @@ function groupColor(g){
   return colorMaps.grp.get(g) || null;
 }
 // Bank/app accounts get their own colour wherever the name shows (entry tags, บัญชีของฉัน, transfers).
-const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7"};
+const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7", "Grab": "#00452e", "Line Man": "#b5efc2", "LINE MAN": "#b5efc2", "Lineman": "#b5efc2"};
 const accColor = a => a ? (settings.accColors || {})[a] || ACC_DEF[a] || null : null;
 function accChip(a){
   const c = accColor(a); if (!c) return document.createTextNode(a);
@@ -1113,7 +1113,7 @@ function entryItem(e, inBill){
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
     if (e.shop && !inBill) tags.push("จาก " + e.shop);
     if (e.time) tags.push(`เวลา ${e.time} น.`);
-    if (e.payer) tags.push("จาก " + e.payer);
+    if (e.payer) tags.push(accColor(e.payer) ? {payer: e.payer} : "จาก " + e.payer);
     { const z = sizeOf(e); if (z){ const c = costPer(e); tags.push(`${z.size} ${z.unit}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); } }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
@@ -1124,7 +1124,7 @@ function entryItem(e, inBill){
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
-    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
+    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.payer ? (x => (x.append("จาก ", accChip(t.payer)), x))(el("span", "tag")) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     if (selMode && e.kind === "expense"){ it.classList.add("selectable"); if (selIds.has(e.id)) it.classList.add("picked"); }
@@ -1326,7 +1326,7 @@ function renderCatColors(){
   }
   const aown = settings.accColors || {};
   box.append(el("div", "cc-h", "บัญชี / ช่องทางจ่าย"));
-  const accNames = [...new Set([...accList(), ...Object.keys(ACC_DEF).filter(n => entries.some(e => e.account === n)), ...Object.keys(aown), ...entries.map(e => e.account).filter(Boolean), ...(entries.some(e => e.pay === TCT) ? [TCT] : [])])];
+  const accNames = [...new Set([...accList(), ...Object.keys(ACC_DEF).filter(n => entries.some(e => e.account === n)), ...Object.keys(aown), ...entries.map(e => e.account).filter(Boolean), ...entries.map(e => e.payer).filter(p => p && accColor(p)), ...(entries.some(e => e.pay === TCT) ? [TCT] : [])])];
   for (const n of accNames){
     const row = el("div", "cc-row");
     const inp = document.createElement("input"); inp.type = "color"; inp.value = cssHex(accColor(n) || "#888888"); inp.setAttribute("aria-label", "สีของ " + n);
