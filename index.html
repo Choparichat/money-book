@@ -2125,12 +2125,15 @@ function renderPayPlans(box){
 /* ---------- my accounts and transfers between them ---------- */
 // Which account money came in to or went out of, for the period on screen. Only bank/app transfers and cash
 // carry an account; rows typed in the sheet have none and are counted under "ไม่ระบุ".
+const accFlowKey = e => e.pay === "เงินสด" ? "เงินสด" : e.account || "ไม่ระบุ";
+const accFlowIn = e => ["income", "expense", "saving"].includes(e.kind) && !(e.pay && !["โอน/สแกนจ่าย", "เงินสด"].includes(e.pay));
+let accOpen = ""; // the account row tapped open under the table
 function accFlows(P){
   const m = new Map(), add = (k, inn, out) => { const v = m.get(k) || {inn: 0, out: 0}; v.inn = c2(v.inn + inn); v.out = c2(v.out + out); m.set(k, v); };
   for (const e of P){
     if (!["income", "expense", "saving"].includes(e.kind)) continue;
     if (e.pay && !["โอน/สแกนจ่าย", "เงินสด"].includes(e.pay)) continue; // credit card, pay later, ไทยช่วยไทย: not straight from an account
-    const k = e.pay === "เงินสด" ? "เงินสด" : e.account || "ไม่ระบุ", a = Number(e.amount) || 0;
+    const k = accFlowKey(e), a = Number(e.amount) || 0;
     if (e.kind === "income" || (e.kind === "saving" && e.side === "ขาย")) add(k, a, 0); else add(k, 0, a);
   }
   for (const t of transfers.filter(inPeriod)){ const a = Number(t.amount) || 0; add(t.account || "ไม่ระบุ", 0, a); add(t.group || "ไม่ระบุ", a, 0); }
@@ -2145,10 +2148,22 @@ function renderAccPanel(P){
     const t = el("table"), hd = el("thead"), hr = el("tr");
     ["บัญชี", "เข้า", "ออก", "สุทธิ"].forEach((x, i) => hr.append(el("th", i ? "n" : "", x))); hd.append(hr); t.append(hd);
     const tb = el("tbody");
-    rows.forEach(([k, v]) => { const tr = el("tr", k === "ไม่ระบุ" ? "muted" : ""), net = c2(v.inn - v.out);
+    rows.forEach(([k, v]) => { const tr = el("tr", "srch-row" + (k === "ไม่ระบุ" ? " muted" : "") + (k === accOpen ? " on" : "")), net = c2(v.inn - v.out);
+      tr.tabIndex = 0; const go = () => { accOpen = accOpen === k ? "" : k; render(); };
+      tr.addEventListener("click", go); tr.addEventListener("keydown", ev => { if (ev.key === "Enter") go(); });
       const td = el("td"); td.append(accChip(k)); tr.append(td, el("td", "n", v.inn ? fmt(v.inn) : "–"), el("td", "n", v.out ? fmt(v.out) : "–"), el("td", "n" + (net < 0 ? " neg" : ""), (net < 0 ? "−" : "") + fmt(Math.abs(net)))); tb.append(tr); });
     t.append(tb); const sc = el("div", "scroll"); sc.append(t); box.append(sc);
-    box.append(el("p", "hint", "เงินที่เข้า-ออกแต่ละบัญชีในช่วงที่เปิดดู รวมการโอนระหว่างบัญชีด้วย แต่การโอนไม่นับเป็นรายรับหรือรายจ่าย"));
+    box.append(el("p", "hint", "เงินที่เข้า-ออกแต่ละบัญชีในช่วงที่เปิดดู รวมการโอนระหว่างบัญชีด้วย แต่การโอนไม่นับเป็นรายรับหรือรายจ่าย · แตะแถวเพื่อดูรายการแล้วกดแก้ได้"));
+    if (accOpen && rows.some(([k]) => k === accOpen)){
+      // the entries behind the row (transfers are listed further down); tap one to edit it, e.g. to set its account
+      const L = P.filter(e => accFlowIn(e) && accFlowKey(e) === accOpen);
+      const d = el("div", "dn-detail"), hd = el("div", "dn-head"), close = el("button", "btn sm", "ปิด ✕"); close.type = "button";
+      close.addEventListener("click", () => { accOpen = ""; render(); });
+      hd.append(el("strong", "", `${accOpen} · ${L.length} รายการ`), close); d.append(hd);
+      if (accOpen === "ไม่ระบุ") d.append(el("p", "hint", "รายการที่ยังไม่ได้ใส่บัญชี แตะรายการแล้วเลือกช่อง เข้าบัญชี / จากบัญชี"));
+      const lb = el("div", "list"); d.append(lb); entryList(lb, L.sort((a, b) => a.date < b.date ? 1 : -1), "acc-" + accOpen);
+      box.append(d);
+    }
   }
   const list = transfers.filter(inPeriod).sort((a, b) => a.date < b.date ? 1 : -1);
   if (list.length){
