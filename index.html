@@ -1072,6 +1072,21 @@ function entryList(box, list, key){
     box.append(b);
   }
 }
+// One bill is paid one way: changing the bank (or how it was paid) on one item changes the whole bill.
+// Not for ไทยช่วยไทย or installments, which work out each item's amount on their own.
+async function billPayAll(was, now){
+  if (!was.billId || was.kind !== "expense" || [TCT, "ผ่อนจ่าย"].includes(now.pay)) return;
+  if ((now.pay || "") === (was.pay || "") && (now.account || "") === (was.account || "")) return;
+  const sib = entries.filter(x => x.billId === was.billId && x.id !== was.id && x.pay !== TCT && !x.instId);
+  const put = x => { x.pay = now.pay; if (now.account) x.account = now.account; else delete x.account; return x; };
+  const rows = sib.filter(x => x.src === "sheet");
+  if (rows.length){
+    const m = rows.reduce((m, e) => setSheetPay({...e, amount: sheetAmt(e)}, put({...e}), m), {...sheetPays()});
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  const app = sib.filter(x => x.src !== "sheet").map(x => put({...x, updatedAt: new Date().toISOString()}));
+  if (app.length) await store.save(app);
+}
 /* ---------- group separate rows into one bill (tick, then merge) ---------- */
 let selMode = false, selIds = new Set();
 function toggleSel(e, it){ if (selIds.has(e.id)) selIds.delete(e.id); else selIds.add(e.id); it.classList.toggle("picked", selIds.has(e.id)); selBar(); }
@@ -2845,7 +2860,7 @@ $("entryForm").addEventListener("submit", async ev => {
     // the sheet keeps the full price; on screen a ไทยช่วยไทย row counts only what we paid
     const shown = govNow != null ? {...upd, amount: base.amount, tctGov: govNow, sheetAmount: amount} : upd;
     // overlay first: saving the row re-renders, and the old overlay would be put back on it
-    try { if (kind !== "saving") setSheetPay(was, {...shown}); await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    try { if (kind !== "saving"){ const before = {...editing}; setSheetPay(was, {...shown}); await billPayAll(before, upd); } await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -2867,6 +2882,7 @@ $("entryForm").addEventListener("submit", async ev => {
   $("saveBtn").disabled = true;
   try {
     await store.save(out);
+    if (editing) await billPayAll(editing, base);
     rememberSizes(out);
     if (govNow != null) setGov({[out[0].id]: govNow});
     const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
