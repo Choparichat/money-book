@@ -3374,7 +3374,7 @@ function initStore(){
         try { const v = await call({ops: []}); ls.set("money-book-script", v.version || 0); probe = ` · ทดสอบส่งเปล่าผ่าน (สคริปต์รุ่น ${v.version || "เก่า"}) ส่ง ${q.length - bad.length}/${q.length} รายการได้`; }
         catch { probe = " · ทดสอบส่งเปล่าก็ไม่ผ่าน: สคริปต์รับการบันทึกไม่ได้เลย"; }
       }
-      if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 6) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะบอกได้ว่าติดตรงไหน";
+      if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 7) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะบอกได้ว่าติดตรงไหน";
       // a row edit the sheet will not take, but the row in the sheet already says what the edit wanted: nothing left to send
       if (bad.some(([x]) => x.op === "sheetEdit") && /ทดสอบส่งเปล่าผ่าน/.test(probe)){
         try {
