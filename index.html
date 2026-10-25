@@ -2855,8 +2855,10 @@ $("entryForm").addEventListener("submit", async ev => {
       SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
       if (editing.billId) upd.billId = editing.billId;
     }
-    const same = (a, b) => String(a ?? "") === String(b ?? ""), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note", "unitPrice", "qty"];
-    const touched = Number(upd.amount) !== Number(was.amount) || sheetCols.some(k => !same(upd[k], editing[k]));
+    const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim(), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note"];
+    // 1 × the total says no more than an empty price and count
+    const pq = e => { const u = Number(e.unitPrice) || 0, n = Number(e.qty) || 0; return (n === 1 || !n) && (!u || u === Number(e.amount)) ? "" : `${u}|${n}`; };
+    const touched = Number(upd.amount) !== Number(was.amount) || sheetCols.some(k => !same(upd[k], editing[k])) || (kind !== "saving" && pq(upd) !== pq(was));
     // the sheet keeps the full price; on screen a ไทยช่วยไทย row counts only what we paid
     const shown = govNow != null ? {...upd, amount: base.amount, tctGov: govNow, sheetAmount: amount} : upd;
     // overlay first: saving the row re-renders, and the old overlay would be put back on it
@@ -3262,7 +3264,7 @@ function initStore(){
     if (!P.length) return;
     const d = document.createElement("details"); d.className = "syncq";
     const sm = document.createElement("summary"); sm.textContent = `ดูรายการที่ค้างส่ง (${P.length})`; d.append(sm);
-    const b0 = e => e ? `${e.date || ""} ${e.note || e.name || ""} ${e.amount != null ? Number(e.amount).toLocaleString("th-TH") + " บาท" : ""}`.trim() : "";
+    const b0 = e => e ? [e.date, e.name, e.note, e.qty || e.unitPrice ? `${e.qty || ""} × ${e.unitPrice || ""}` : "", e.amount != null ? Number(e.amount).toLocaleString("th-TH") + " บาท" : ""].filter(Boolean).join(" · ") : "";
     for (const p of P){
       const row = document.createElement("div"); row.className = "syncq-row";
       const t = document.createElement("div");
@@ -3329,9 +3331,11 @@ function initStore(){
   async function flush(){
     if (!cfg || busy) return;
     // drop sheet-row edits that change none of the sheet's own columns (only app-kept details changed)
-    const same = (a, b) => String(a ?? "") === String(b ?? "");
+    const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim();
+    // price × count only restating the amount (1 × the total) is the same as leaving them empty
+    const pq = e => { const u = Number(e.unitPrice) || 0, n = Number(e.qty) || 0; return (n === 1 || !n) && (!u || u === Number(e.amount)) ? "" : `${u}|${n}`; };
     const noop = o => o.op === "sheetEdit" && o.kind !== "saving" && o.entry && o.orig && same(o.entry.date, o.orig.date) && Number(o.entry.amount) === Number(o.orig.amount)
-      && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && same(o.entry.unitPrice, o.orig.unitPrice) && same(o.entry.qty, o.orig.qty);
+      && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && pq(o.entry) === pq(o.orig);
     if (ls.get(Q, []).some(noop)) ls.set(Q, ls.get(Q, []).filter(o => !noop(o)));
     // a setting queued several times: keep only its newest value
     { const q0 = ls.get(Q, []), last = {}; q0.forEach(o => { if (o.op === "setting") last[o.key] = o.seq; });
