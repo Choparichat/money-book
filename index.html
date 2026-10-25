@@ -3328,12 +3328,13 @@ function initStore(){
     flush();
   }
   const keyOf = e => [e.kind, e.date, Math.round((Number(e.amount)||0)*100), String(e.name||"").trim(), String(e.note||"").trim()].join("|");
+  const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim();
+  // price × count only restating the amount (1 × the total) is the same as leaving them empty
+  const pq = e => { const u = Number(e.unitPrice) || 0, n = Number(e.qty) || 0; return (n === 1 || !n) && (!u || u === Number(e.amount)) ? "" : `${u}|${n}`; };
+  const rowSays = (r, e) => same(r.date, e.date) && Number(r.amount) === Number(e.amount) && same(r.name, e.name) && same(r.note, e.note) && pq(r) === pq(e);
   async function flush(){
     if (!cfg || busy) return;
     // drop sheet-row edits that change none of the sheet's own columns (only app-kept details changed)
-    const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim();
-    // price × count only restating the amount (1 × the total) is the same as leaving them empty
-    const pq = e => { const u = Number(e.unitPrice) || 0, n = Number(e.qty) || 0; return (n === 1 || !n) && (!u || u === Number(e.amount)) ? "" : `${u}|${n}`; };
     const noop = o => o.op === "sheetEdit" && o.kind !== "saving" && o.entry && o.orig && same(o.entry.date, o.orig.date) && Number(o.entry.amount) === Number(o.orig.amount)
       && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && pq(o.entry) === pq(o.orig);
     if (ls.get(Q, []).some(noop)) ls.set(Q, ls.get(Q, []).filter(o => !noop(o)));
@@ -3373,6 +3374,19 @@ function initStore(){
         catch { probe = " · ทดสอบส่งเปล่าก็ไม่ผ่าน: สคริปต์รับการบันทึกไม่ได้เลย"; }
       }
       if (/ผิดพลาดระหว่างบันทึก/.test(m) && bad.some(([x]) => x.op === "sheetEdit") && ls.get("money-book-script", 0) < 6) m = "ต้องอัปเดตสคริปต์ในชีตเป็นตัวใหม่ (ขั้นตอนอยู่ในแชต) แล้วจะบอกได้ว่าติดตรงไหน";
+      // a row edit the sheet will not take, but the row in the sheet already says what the edit wanted: nothing left to send
+      if (bad.some(([x]) => x.op === "sheetEdit") && /ทดสอบส่งเปล่าผ่าน/.test(probe)){
+        try {
+          const j = await call({ops: [], list: true}), rows = j.entries || [];
+          const done = bad.filter(([x]) => x.op === "sheetEdit" && x.entry && rows.some(r => r.tab === x.tab && Number(r.row) === Number(x.row) && rowSays(r, x.entry)));
+          if (done.length){
+            const gone = new Set(done.map(([x]) => x.seq));
+            ls.set(Q, ls.get(Q, []).filter(o => !gone.has(o.seq)));
+            bad = bad.filter(([x]) => !gone.has(x.seq));
+            if (!bad.length){ ok = true; clean = true; setTimeout(() => pull(), 0); }
+          }
+        } catch {}
+      }
       ls.set("money-book-bad", bad.map(([x, why]) => ({seq: x.seq, why})));
       if (bad.length) status(`ยังส่งขึ้น Google Sheet ไม่ได้ ${bad.length} รายการ (${bad.slice(0, 3).map(([x]) => opName(x)).join(", ")}): ${m} ${probe} ข้อมูลยังเก็บไว้ในเครื่อง จะลองใหม่อัตโนมัติ (ดูรายการที่ค้างได้ที่หน้าตั้งค่า)`, true);
     }
