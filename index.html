@@ -283,6 +283,7 @@ input,select,textarea{background:var(--bg);border:1px solid var(--line);border-r
 label.btn{display:inline-block}
 
 .syncq{margin-top:8px}.syncq summary{cursor:pointer;font-weight:600}.syncq-row{display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}.syncq-row>div{min-width:0;overflow-wrap:anywhere}
+.tag.memo{white-space:normal;background:color-mix(in srgb,var(--accent) 12%,var(--sunk))}
 .selbar{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;box-shadow:0 -4px 14px rgba(0,0,0,.2)}
 .selbar .selbtns{display:flex;gap:6px;flex-wrap:wrap}
 .item.selectable{padding-left:44px;position:relative}
@@ -625,6 +626,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
+    <div class="field"><label for="fMemo">หมายเหตุ</label><input id="fMemo" autocomplete="off" placeholder="เช่น ราคาจริง 489.99 แต่คนส่งเก็บรวม 904"></div>
     <div class="pl-row" id="plRow" hidden>
       <label class="check"><input type="checkbox" id="fPL"> 💳 จ่ายด้วย TikTok Pay Later (จ่ายเต็มรอบเดียว)</label>
       <div class="field" id="plDueField" hidden><label for="fPLDue">ครบกำหนดจ่ายวันที่ (วัน/เดือน/ปี)</label><input id="fPLDue" type="date"></div>
@@ -1006,7 +1008,7 @@ function renderSearch(kind){
   out.textContent = ""; if (!q){ srchPick[kind] = ""; return; }
   if (srchQ[kind] !== q){ srchQ[kind] = q; srchPick[kind] = ""; }
   const words = q.split(/\s+/);
-  const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit].filter(Boolean).join(" ").toLowerCase();
+  const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit, memoOf(e)].filter(Boolean).join(" ").toLowerCase();
   const hits = entries.filter(e => e.kind === kind && (h => words.every(w => h.includes(w)))(hay(e)));
   const total = c2(hits.reduce((a, e) => a + (Number(e.amount) || 0), 0));
   out.append(el("p", "hint srch-sum", hits.length ? `พบ ${hits.length} รายการ · รวม ${fmt(total)} บาท${hits.length ? ` · ${thaiDate(hits.reduce((a, e) => e.date < a ? e.date : a, hits[0].date))} ถึง ${thaiDate(hits.reduce((a, e) => e.date > a ? e.date : a, hits[0].date))}` : ""}` : "ไม่พบรายการที่ตรงกับคำค้น"));
@@ -1152,7 +1154,8 @@ function entryItem(e, inBill){
     if (e.inst) tags.push("งวด " + e.inst);
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
-    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
+    if (memoOf(e)) tags.push({memo: memoOf(e)});
+    tags.filter(Boolean).forEach(t => s.append(t.pay ? payTag(t.pay) : t.memo ? el("span", "tag memo", "📝 " + t.memo) : t.pl ? el("span", "tag pl", t.pl) : t.cat ? el("span", "tag" + (cc ? " cat" : ""), t.cat) : el("span", "tag", t)));
     it.append(s);
     it.append(el("div", `a num ${e.kind}`, (e.kind === "saving" && e.side === "ขาย" ? "−" : "") + fmt(e.amount)));
     if (selMode && e.kind === "expense"){ it.classList.add("selectable"); if (selIds.has(e.id)) it.classList.add("picked"); }
@@ -1177,7 +1180,7 @@ function chips(box, rows, key){
 // if the id moved, by its content (one row per record), and are put back on the row each render.
 const sheetPays = () => settings.sheetPay || {};
 // app-only details kept for a sheet row: pay and account always, the rest only once they were set ("" = cleared)
-const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer", "billId"];
+const SHEET_EXTRA = ["shop", "biz", "unit", "time", "payer", "billId", "memo"];
 // A sheet row paid with ไทยช่วยไทย keeps the full price in the sheet; the app counts only our share
 // (t.ours) and remembers the government's (t.gov). sheetAmount is what the sheet itself says.
 const sheetAmt = e => e.sheetAmount != null ? e.sheetAmount : Number(e.amount);
@@ -1204,7 +1207,7 @@ function setSheetPay(orig, upd, into){
   for (const [id, t] of Object.entries(m)) if (id === orig.id || id === upd.id || (!allEntries.some(x => x.id === id) && sheetSame(orig, t))) delete m[id];
   const rec = {...plSnap(upd), amount: sheetAmt(upd), pay: upd.pay || "", ...(upd.account ? {account: upd.account} : {}), ...(upd.pay === TCT && upd.tctGov != null ? {ours: upd.amount, gov: upd.tctGov} : {})};
   SHEET_EXTRA.forEach(k => rec[k] = upd[k] || "");
-  if ((rec.pay || rec.billId) && (rec.pay !== "เงินสด" || rec.account || rec.ours != null || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
+  if ((rec.pay || rec.billId || rec.memo) && (rec.pay !== "เงินสด" || rec.account || rec.ours != null || SHEET_EXTRA.some(k => rec[k] && !(k === "biz" && rec[k] === bizOf({...upd, biz: ""}))))) m[upd.id] = rec;
   if (!into && JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
   return m;
 }
@@ -1384,6 +1387,14 @@ function needSize(){
 }
 // Entries the user flagged to come back to (e.g. income they can't place yet). Kept in synced settings.
 const fuIds = () => settings.followUp || [];
+// หมายเหตุ: a free note on any entry. Rows typed in the sheet keep it with their other app-only details;
+// the app's own entries keep it in settings (by id), so it syncs without a new column in the sheet.
+const memoOf = e => e.memo || (settings.memos || {})[e.id] || "";
+function setMemo(ids, text){
+  const m = {...(settings.memos || {})}, before = JSON.stringify(m);
+  ids.forEach(id => { if (text) m[id] = text; else delete m[id]; });
+  if (JSON.stringify(m) !== before) store.setSetting("memos", m);
+}
 function setFollow(ids, on){
   const s = new Set(fuIds()), before = s.size;
   ids.forEach(id => on ? s.add(id) : s.delete(id));
@@ -2777,7 +2788,7 @@ function openForm(e){
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
-    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || "";
+    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || ""; $("fMemo").value = memoOf(e);
     $("fFollow").checked = fuIds().includes(e.id); // rows typed in the sheet's year tab have no time/name columns
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
@@ -2854,6 +2865,7 @@ $("entryForm").addEventListener("submit", async ev => {
       upd.pay = base.pay; if (base.account) upd.account = base.account; else delete upd.account;
       SHEET_EXTRA.forEach(k => { if (base[k]) upd[k] = base[k]; else delete upd[k]; });
       if (editing.billId) upd.billId = editing.billId;
+      const mm = $("fMemo").value.trim(); if (mm) upd.memo = mm; else delete upd.memo;
     }
     const same = (a, b) => String(a ?? "").trim() === String(b ?? "").trim(), sheetCols = kind === "saving" ? ["date", "name", "side", "group"] : ["date", "name", "note"];
     // 1 × the total says no more than an empty price and count
@@ -2888,6 +2900,7 @@ $("entryForm").addEventListener("submit", async ev => {
     rememberSizes(out);
     if (govNow != null) setGov({[out[0].id]: govNow});
     const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
+    setMemo(out.map(x => x.id), $("fMemo").value.trim());
     if (kind === "expense" && ($("fPL").checked || editing)) setPL(out.map(x => ({e: x, was: editing})), $("fPL").checked, $("fPLDue").value);
     if (editing){ $("dlg").close(); return; }
     const where = `${name}${base.note ? " · " + base.note : ""} วันที่ ${thaiDate(date)}`;
