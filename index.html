@@ -592,7 +592,8 @@ details summary{cursor:pointer;font-weight:500}
     </div>
     <div class="field" id="bizField"><label for="fBiz">ของใคร</label><div class="pick"><select id="fBiz"></select><input id="fBizNew" hidden placeholder="ชื่อร้าน/กิจการใหม่"></div></div>
     <div class="field"><label for="fName" id="fNameLabel">หมวด</label><div class="pick"><select id="fName"></select><input id="fNameNew" hidden placeholder="ชื่อหมวดใหม่"></div></div>
-    <div class="field" id="noteField"><label for="fNote">รายละเอียด</label><div class="pick"><select id="fNote"></select><input id="fNoteNew" hidden placeholder="พิมพ์รายละเอียดใหม่"></div></div>
+    <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
+    <div class="field" id="noteField"><label for="fNote">รายละเอียด</label><div class="pick"><select id="fNote"></select><input id="fNoteNew" hidden placeholder="พิมพ์รายละเอียดใหม่"></div><div class="hint" id="shopPriceHint" hidden></div></div>
     <div class="three" id="qtyRow">
       <div class="field"><label for="fQty">จำนวน</label><input id="fQty" type="number" step="any" min="0" inputmode="decimal"></div>
       <div class="field" id="unitField"><label for="fUnitName">หน่วย</label><div class="pick"><select id="fUnitName"></select><input id="fUnitNameNew" hidden placeholder="หน่วย"></div></div>
@@ -606,7 +607,6 @@ details summary{cursor:pointer;font-weight:500}
       <div class="pick" style="grid-template-columns:1fr 84px"><input id="fItemDisc" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0"><select id="fItemDiscType" aria-label="หน่วยส่วนลดรายการ"><option value="baht">บาท</option><option value="pct">%</option></select></div>
       <div class="hint" id="itemDiscHint" hidden></div>
     </div>
-    <div class="field" id="shopField"><label for="fShop">ซื้อจากร้าน</label><div class="pick"><select id="fShop"></select><input id="fShopNew" hidden placeholder="ชื่อร้านใหม่"></div></div>
     <div class="two" id="incRow" hidden>
       <div class="field"><label for="fTime">เวลา</label><input id="fTime" type="time"></div>
       <div class="field"><label for="fPayer">ชื่อคนจ่าย</label><div class="pick"><select id="fPayer"></select><input id="fPayerNew" hidden placeholder="ชื่อคนจ่ายใหม่"></div></div>
@@ -2723,18 +2723,43 @@ onPick(pk.note, () => {
   applyNoteCat();
   // Same item as before: start from the last unit, shop and price paid.
   const n = pickVal(pk.note);
+  shopPriceHint();
   if (kind !== "expense" || !n || editing) return;
-  const last = entries.filter(e => e.kind === "expense" && e.note === n).sort((a,b) => a.date < b.date ? 1 : -1)[0];
-  if (!last) return;
-  if (last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
-  if (last.unit) setPick(pk.unit, last.unit);
-  if (last.shop) setPick(pk.shop, last.shop);
+  // each shop has its own price: with a shop picked, start from what was paid there
+  const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n).sort((a,b) => a.date < b.date ? 1 : -1);
+  const last = (shop && all.find(e => e.shop === shop)) || (shop ? null : all[0]);
+  if (!all.length) return;
+  if (last && last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
+  const ref = last || all[0];
+  if (ref.unit) setPick(pk.unit, ref.unit);
+  if (!shop && ref.shop) setPick(pk.shop, ref.shop);
+  shopPriceHint();
   const sz = entries.filter(e => e.kind === "expense" && e.note === n && e.size > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
   const zz = sz ? {size: sz.size, unit: sz.sizeUnit || "ml"} : sizeOf({note: n});
   if (zz){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   updateAmount(); showSize();
 });
-onPick(pk.unit); onPick(pk.shop); onPick(pk.group); onPick(pk.acc); onPick(pk.payer);
+// the last price paid for this item at each shop, under the item
+function shopPriceHint(){
+  const h = $("shopPriceHint"); if (!h) return;
+  const n = pickVal(pk.note); h.hidden = true; h.textContent = "";
+  if (kind !== "expense" || !n) return;
+  const by = new Map();
+  entries.filter(e => e.kind === "expense" && e.note === n && e.shop && Number(e.unitPrice || e.amount) > 0).sort((a, b) => a.date < b.date ? 1 : -1)
+    .forEach(e => { if (!by.has(e.shop)) by.set(e.shop, e); });
+  if (!by.size) return;
+  const cur = pickVal(pk.shop);
+  h.textContent = "ราคาล่าสุดแต่ละร้าน: " + [...by.values()].map(e => `${e.shop === cur ? "▶ " : ""}${e.shop} ${fmt(Number(e.unitPrice) || Number(e.amount))}${e.unit ? "/" + e.unit : ""} (${thaiDate(e.date).slice(0, 5)})`).join(" · ");
+  h.hidden = false;
+}
+onPick(pk.unit); onPick(pk.shop, () => {
+  shopPriceHint();
+  // a different shop: its own last price for this item
+  const n = pickVal(pk.note), shop = pickVal(pk.shop);
+  if (kind !== "expense" || !n || !shop || editing) return;
+  const last = entries.filter(e => e.kind === "expense" && e.note === n && e.shop === shop && e.unitPrice > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
+  if (last){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; updateAmount(); showSize(); }
+}); onPick(pk.group); onPick(pk.acc); onPick(pk.payer);
 $("fPay").addEventListener("change", () => fillAcc(""));
 // fAmount is always what is paid for this item; the item discount comes off the full price.
 let itemGross = 0;
@@ -2805,7 +2830,7 @@ function openForm(e){
   $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && (e.instId || e.billId));
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
-  $("entryForm").reset();
+  $("entryForm").reset(); $("shopPriceHint").hidden = true;
   itemGross = 0; $("itemDiscHint").hidden = true; $("sizeHint").hidden = true;
   setKind(k, true);
   if (e){
@@ -2813,7 +2838,7 @@ function openForm(e){
     $("fDate").value = e.date; $("fAmount").value = e.amount;
     $("fUnit").value = e.unitPrice || ""; $("fQty").value = e.qty || "";
     $("fItemDisc").value = e.itemDisc || ""; $("fSize").value = e.size || ""; $("fSizeUnit").value = e.sizeUnit || "ml"; showSize(); itemGross = r2(e.amount + (e.disc || 0) + (e.itemDisc || 0));
-    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || ""; $("fMemo").value = memoOf(e);
+    setPick(pk.unit, e.unit || ""); setPick(pk.shop, e.shop || ""); setPick(pk.payer, e.payer || ""); $("fTime").value = e.time || ""; $("fMemo").value = memoOf(e); shopPriceHint();
     $("fFollow").checked = fuIds().includes(e.id); // rows typed in the sheet's year tab have no time/name columns
     $("fSide").value = e.side || "ซื้อ"; setPick(pk.group, e.group || ""); $("fWho").value = e.who === PARTNER ? PARTNER : "";
     fillPays(e.pay || ""); if (!e.pay) $("fPay").value = PAYS[kind][0];
