@@ -834,7 +834,7 @@ function groupColor(g){
   return colorMaps.grp.get(g) || null;
 }
 // Bank/app accounts get their own colour wherever the name shows (entry tags, บัญชีของฉัน, transfers).
-const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7", "Grab": "#00452e", "Line Man": "#8ee6a0", "LINE MAN": "#8ee6a0", "Lineman": "#8ee6a0"};
+const ACC_DEF = {"ออมสิน": "#e5508f", "Make by KBank": "#8fd16a", "KBank": "#0f7a3a", "SCB": "#6f3fb0", "กรุงไทย": "#1ba1e2", "Next": "#1ba1e2", "Kept": "#f0b400", "7-11": "#ffffff", "7-Eleven": "#ffffff", "ไทยช่วยไทย": "#a9dcf7", "Grab": "#00452e", "Line Man": "#8ee6a0", "LINE MAN": "#8ee6a0", "Lineman": "#8ee6a0"};
 const accColor = a => a ? (settings.accColors || {})[a] || ACC_DEF[a] || null : null;
 function accChip(a){
   const c = accColor(a); if (!c) return document.createTextNode(a);
@@ -1266,8 +1266,25 @@ function renderCheckApps(){
   ok.addEventListener("click", go2); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go2(); } });
   add.append(inp, ok); box.append(add);
 }
-const DEF_ACCTS = ["Make by KBank", "KBank", "SCB", "ออมสิน", "กรุงไทย", "Kept"];
+const DEF_ACCTS = ["Make by KBank", "KBank", "SCB", "ออมสิน", "Next", "Kept"];
 const accList = () => Array.isArray(settings.accounts) && settings.accounts.length ? settings.accounts : DEF_ACCTS;
+// Rename an account everywhere: the list, its colour, entries, transfers and rows from the sheet
+async function renameAccount(from, to){
+  const S = settings, set = (k, v) => { if (JSON.stringify(v) !== JSON.stringify(S[k])) store.setSetting(k, v); };
+  set("accounts", accList().map(a => a === from ? to : a));
+  if ((S.accColors || {})[from]){ const c = {...S.accColors}; c[to] = c[from]; delete c[from]; set("accColors", c); }
+  const sp = {...sheetPays()}; let ch = false;
+  for (const [id, t] of Object.entries(sp)) if (t.account === from){ sp[id] = {...t, account: to}; ch = true; }
+  if (ch) set("sheetPay", sp);
+  allEntries.filter(e => e.src === "sheet" && e.account === from).forEach(e => { e.account = to; });
+  const now = new Date().toISOString();
+  const app = [...allEntries, ...transfers].filter(e => e.src !== "sheet" && (e.account === from || (e.kind === "transfer" && e.group === from)))
+    .map(e => ({...e, ...(e.account === from ? {account: to} : {}), ...(e.kind === "transfer" && e.group === from ? {group: to} : {}), updatedAt: now}));
+  if (app.length) await store.save(app);
+  else render();
+}
+// กรุงไทย is now called Next (Krungthai's Next app): once, on every device
+setTimeout(() => { if (!settings.renamedNext){ store.setSetting("renamedNext", 1); renameAccount("กรุงไทย", "Next"); } }, 0);
 function renderAccounts(){
   const box = $("accEdit"); if (!box) return;
   box.textContent = "";
@@ -1278,7 +1295,9 @@ function renderAccounts(){
     up.addEventListener("click", () => { const l = [...list]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; put(l); });
     const del = el("button", "btn sm", "ลบ"); del.type = "button"; del.setAttribute("aria-label", "ลบ " + s);
     del.addEventListener("click", () => { if (list.length > 1) put(list.filter(x => x !== s)); });
-    row.append(el("span", "", s), up, del); box.append(row);
+    const ren = el("button", "btn sm", "แก้ชื่อ"); ren.type = "button"; ren.setAttribute("aria-label", "แก้ชื่อ " + s);
+    ren.addEventListener("click", () => { const v = (prompt(`ชื่อใหม่ของ ${s} (รายการเก่าจะเปลี่ยนตามทั้งหมด)`, s) || "").trim(); if (v && v !== s && !list.includes(v)) renameAccount(s, v); });
+    row.append(el("span", "", s), ren, up, del); box.append(row);
   });
   const add = el("div", "ca-add"), inp = document.createElement("input"); inp.placeholder = "ชื่อบัญชีใหม่ เช่น TrueMoney"; inp.setAttribute("aria-label", "ชื่อบัญชีใหม่");
   const ok = el("button", "btn sm primary", "＋ เพิ่ม"); ok.type = "button";
