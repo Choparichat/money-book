@@ -700,6 +700,11 @@ const fmt = n => (Number(n)||0).toLocaleString("th-TH",{minimumFractionDigits:2,
 const SIZE_BASE = {ml: ["ml", 1], l: ["ml", 1000], g: ["g", 1], kg: ["g", 1000], "ชิ้น": ["ชิ้น", 1], "ฟอง": ["ฟอง", 1]};
 // A size typed on the entry, else the one remembered for that item (settings, synced; works for sheet rows too).
 function sizeOf(e){
+  const z = sizeRaw(e);
+  // counted in the same unit as the amount bought (10 ฟอง × 4.70 with a size of 10 ฟอง): the size says nothing new
+  return z && e.unit && z.unit === e.unit ? null : z;
+}
+function sizeRaw(e){
   if (Number(e.size) > 0) return {size: Number(e.size), unit: e.sizeUnit || "ml"};
   const k = (e.note || "").trim(), m = k && (settings.itemSizes || {})[k];
   return m && m.size > 0 ? {size: m.size, unit: m.unit || "ml"} : null;
@@ -717,10 +722,11 @@ function rememberSizes(list){
   if (changed) store.setSetting("itemSizes", m);
 }
 function costPer(e){
-  const z = sizeOf(e); if (!z) return null;
+  const z = sizeRaw(e); if (!z) return null;
   const s = z.size, b = SIZE_BASE[z.unit], a = Number(e.amount);
   if (!(s > 0) || !b || !(a > 0)) return null;
-  const total = s * b[1] * (Number(e.qty) > 0 ? Number(e.qty) : 1);
+  // bought by the same unit as the size (10 ฟอง): the count bought is the total, not count × size
+  const total = e.unit && z.unit === e.unit && Number(e.qty) > 0 ? Number(e.qty) * b[1] : s * b[1] * (Number(e.qty) > 0 ? Number(e.qty) : 1);
   return {per: a / total, base: b[0], total, size: s, unit: z.unit};
 }
 const fmtC = v => v >= 1 ? fmt(v) : (Number(v)||0).toLocaleString("th-TH", {minimumFractionDigits: 2, maximumFractionDigits: 4});
@@ -1398,7 +1404,7 @@ function needSize(){
     if (e.kind !== "expense" || bizOf(e) !== "Muan" || e.name !== RAW) continue;
     const n = (e.note || "").trim(); if (!n || skip.has(n)) continue;
     const v = byNote.get(n) || {note: n, last: null, sized: false};
-    if (sizeOf(e)) v.sized = true;
+    if (sizeRaw(e)) v.sized = true;
     if (!v.last || e.date > v.last.date) v.last = e;
     byNote.set(n, v);
   }
