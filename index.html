@@ -1010,11 +1010,11 @@ function makeDraggable(block, day, key){
 // account or other text of the entry. Shows a count, total, what was bought most, then the entries.
 const srchPick = {income: "", expense: ""}, srchQ = {income: "", expense: ""};
 function renderSearch(kind){
-  const k = kind === "income" ? "i" : "e", q = $(k + "Search").value.trim().toLowerCase(), out = $(k + "SearchOut");
+  const k = kind === "income" ? "i" : "e", q = thaiFold($(k + "Search").value).trim().toLowerCase(), out = $(k + "SearchOut");
   out.textContent = ""; if (!q){ srchPick[kind] = ""; return; }
   if (srchQ[kind] !== q){ srchQ[kind] = q; srchPick[kind] = ""; }
   const words = q.split(/\s+/);
-  const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit, memoOf(e)].filter(Boolean).join(" ").toLowerCase();
+  const hay = e => [e.name, e.note, e.shop, e.biz, e.account, e.pay, e.group, e.payer, e.unit, memoOf(e)].filter(Boolean).map(thaiFold).join(" ").toLowerCase();
   const hits = entries.filter(e => e.kind === kind && (h => words.every(w => h.includes(w)))(hay(e)));
   const total = c2(hits.reduce((a, e) => a + (Number(e.amount) || 0), 0));
   out.append(el("p", "hint srch-sum", hits.length ? `พบ ${hits.length} รายการ · รวม ${fmt(total)} บาท${hits.length ? ` · ${thaiDate(hits.reduce((a, e) => e.date < a ? e.date : a, hits[0].date))} ถึง ${thaiDate(hits.reduce((a, e) => e.date > a ? e.date : a, hits[0].date))}` : ""}` : "ไม่พบรายการที่ตรงกับคำค้น"));
@@ -2558,7 +2558,9 @@ function onPick(p, fn){
 
 /* ---------- type-to-search pickers ---------- */
 // The <select> stays the source of truth; a text box on top filters its options as you type.
-const norm = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+// Thai "ำ" can be typed as one letter or as "ํ" + "า" (some keyboards); both read the same when matching
+const thaiFold = s => String(s || "").replace(/\u0E4D\u0E32/g, "\u0E33").replace(/\u0E32\u0E4D/g, "\u0E33");
+const norm = s => thaiFold(s).toLowerCase().replace(/\s+/g, " ").trim();
 function syncCombo(p){
   if (!p.ci) return;
   const v = p.sel.value;
