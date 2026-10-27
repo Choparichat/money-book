@@ -636,6 +636,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field" id="accField"><label for="fAcc" id="fAccLabel">บัญชี</label><div class="pick"><select id="fAcc"></select><input id="fAccNew" hidden placeholder="ชื่อใหม่"></div></div>
     </div>
     <div class="hint" id="tctHint" hidden></div>
+    <div class="field" id="tctPaidField" hidden><label for="fTctPaid" id="tctPaidLabel">เราจ่ายจริง (บาท)</label><input id="fTctPaid" type="number" inputmode="decimal" step="0.01" min="0"></div>
     <div class="two" id="instRow" hidden>
       <div class="field"><label for="fInstN">ผ่อนกี่งวด</label><select id="fInstN"></select></div>
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
@@ -703,6 +704,23 @@ const tctFull = e => c2((Number(e.amount) || 0) + tctGovOf(e));
 const tctUsed = (date, skip = []) => c2(entries.filter(e => isTct(e) && e.date === date && !skip.includes(e.id)).reduce((a, e) => a + tctGovOf(e), 0));
 const tctSplit = (full, used) => { const gov = Math.max(0, Math.min(c2(full * (1 - TCT_OURS)), c2(TCT_CAP - used))); return {gov, ours: c2(full - gov)}; };
 const setGov = m => store.setSetting("tctGov", {...(settings.tctGov || {}), ...m});
+// What we really paid, when the shop's ไทยช่วยไทย split differs from 60% (the day's cap used up elsewhere,
+// the shop's own rounding): shared over the items by full price, the last one takes the satang left over.
+function tctShare(fulls, paid){
+  const total = c2(fulls.reduce((a, f) => a + f, 0)); let left = c2(paid);
+  return fulls.map((f, i) => { const o = i === fulls.length - 1 ? left : c2(total ? paid * f / total : 0); left = c2(left - o); const ours = Math.min(Math.max(o, 0), f); return {ours, gov: c2(f - ours)}; });
+}
+// the other ไทยช่วยไทย items of a bill take their share of the paid amount
+async function tctPutAll(list){
+  const rows = list.filter(x => x.e.src === "sheet");
+  if (rows.length){
+    const m = rows.reduce((m, {e, ours, gov, full}) => setSheetPay({...e, amount: sheetAmt(e)}, {...e, amount: ours, tctGov: gov, sheetAmount: full}, m), {...sheetPays()});
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  const app = list.filter(x => x.e.src !== "sheet");
+  if (app.length){ await store.save(app.map(({e, ours}) => ({...e, amount: ours, updatedAt: new Date().toISOString()}))); setGov(Object.fromEntries(app.map(({e, gov}) => [e.id, gov]))); }
+}
+const tctBillMates = () => editing?.billId ? entries.filter(x => x.billId === editing.billId && x.id !== editing.id && isTct(x)) : [];
 const PAYS = {expense: ["เงินสด","โอน/สแกนจ่าย","บัตรเครดิต","ผ่อนจ่าย",TCT], income: ["เงินสด","โอน/สแกนจ่าย"], saving: ["โอน/สแกนจ่าย","เงินสด"]};
 const BIZ_LABEL = {Muan: "Muan (ร้านคาเฟ่)"};
 const bizLabel = b => BIZ_LABEL[b] || b;
@@ -2910,6 +2928,7 @@ function sheetMode(e){
 }
 function openForm(e){
   editing = e || null;
+  $("fTctPaid").value = "";
   $("dlg").showModal();
   $("toast").textContent = ""; $("snapMsg").textContent = ""; $("snapTextWrap").hidden = true;
   $("formTitle").textContent = e ? "แก้ไขรายการ" : "เพิ่มรายการ";
@@ -2989,7 +3008,18 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
   let govNow = null;
-  if (kind === "expense" && base.pay === TCT){ const sp = tctSplit(amount, tctUsed(date, editing ? [editing.id] : [])); base.amount = sp.ours; govNow = sp.gov; }
+  let tctMates = [];
+  if (kind === "expense" && base.pay === TCT){
+    const sp = tctSplit(amount, tctUsed(date, editing ? [editing.id] : [])); base.amount = sp.ours; govNow = sp.gov;
+    const paid = parseFloat($("fTctPaid").value);
+    if (paid >= 0 && $("fTctPaid").value.trim() !== ""){
+      const mates = tctBillMates(), fulls = [amount, ...mates.map(tctFull)];
+      if (paid > c2(fulls.reduce((a, f) => a + f, 0))){ toast("ยอดที่จ่ายจริงมากกว่าราคาเต็ม ลองดูอีกครั้งค่ะ", true); return; }
+      const sh = tctShare(fulls, paid);
+      base.amount = sh[0].ours; govNow = sh[0].gov;
+      tctMates = mates.map((e, i) => ({e, full: fulls[i + 1], ...sh[i + 1]}));
+    }
+  }
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด" && base.pay !== TCT) base.account = acc;
   if (editing?.src === "sheet"){
     const was = {...editing, amount: sheetAmt(editing)}; // as the sheet has it
@@ -3011,7 +3041,7 @@ $("entryForm").addEventListener("submit", async ev => {
     // the sheet keeps the full price; on screen a ไทยช่วยไทย row counts only what we paid
     const shown = govNow != null ? {...upd, amount: base.amount, tctGov: govNow, sheetAmount: amount} : upd;
     // overlay first: saving the row re-renders, and the old overlay would be put back on it
-    try { if (kind !== "saving"){ const before = {...editing}; setSheetPay(was, {...shown}); await billPayAll(before, upd); } await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    try { if (kind !== "saving"){ const before = {...editing}; setSheetPay(was, {...shown}); await billPayAll(before, upd); } await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); if (tctMates.length) await tctPutAll(tctMates); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -3036,6 +3066,7 @@ $("entryForm").addEventListener("submit", async ev => {
     if (editing) await billPayAll(editing, base);
     rememberSizes(out);
     if (govNow != null) setGov({[out[0].id]: govNow});
+    if (tctMates.length) await tctPutAll(tctMates);
     const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
     setMemo(out.map(x => x.id), $("fMemo").value.trim());
     if (kind === "expense" && ($("fPL").checked || editing)) setPL(out.map(x => ({e: x, was: editing})), $("fPL").checked, $("fPLDue").value);
@@ -3097,7 +3128,7 @@ function showBillUI(){
   line("รวมก่อนลด", fmt(gross));
   if (disc) line("ส่วนลด", "−" + fmt(disc));
   line("ยอดจ่ายจริง", fmt(net), "net");
-  if ($("fPay").value === TCT && kind === "expense"){ const sp = tctSplit(net, tctUsed($("fDate").value, billEdit ? billEdit.ids : [])); line("รัฐออกให้", fmt(sp.gov)); line("เราจ่ายเอง", fmt(sp.ours)); }
+  if ($("fPay").value === TCT && kind === "expense"){ const pv = $("fTctPaid").value.trim(), sp = pv !== "" && parseFloat(pv) >= 0 && parseFloat(pv) <= net ? {ours: c2(parseFloat(pv)), gov: c2(net - parseFloat(pv))} : tctSplit(net, tctUsed($("fDate").value, billEdit ? billEdit.ids : [])); line("รัฐออกให้", fmt(sp.gov)); line("เราจ่ายเอง", fmt(sp.ours)); }
   showTct();
 }
 // Under the amount: what we pay and what the government pays when the bill is on ไทยช่วยไทย.
@@ -3105,6 +3136,13 @@ function showTct(){
   const on = kind === "expense" && $("fPay").value === TCT, h = $("tctHint");
   $("fAmountLabel").textContent = on ? "ราคาเต็ม (บาท)" : "จำนวนเงินรวม (บาท)";
   const full = parseFloat($("fAmount").value);
+  $("tctPaidField").hidden = !on;
+  if (on){
+    const mates = bill.length ? [] : tctBillMates(), whole = bill.length > 0 || mates.length > 0;
+    $("tctPaidLabel").textContent = whole ? "เราจ่ายจริงทั้งบิล (บาท)" : "เราจ่ายจริง (บาท)";
+    const cur = bill.length ? null : c2(mates.reduce((a, x) => a + (Number(x.amount) || 0), 0) + (full > 0 ? tctSplit(full, tctUsed($("fDate").value, editing ? [editing.id, ...mates.map(x => x.id)] : [])).ours : 0));
+    $("fTctPaid").placeholder = cur ? `แอปคิดให้ ${fmt(cur)} ถ้าจ่ายจริงไม่เท่านี้ใส่ยอดจริง` : "ว่างไว้ แอปคิด 40% ให้";
+  }
   h.hidden = !on || bill.length > 0 || !(full > 0);
   if (!h.hidden){
     const used = tctUsed($("fDate").value, editing ? [editing.id] : []), sp = tctSplit(full, used);
@@ -3113,6 +3151,8 @@ function showTct(){
   }
 }
 $("fAmount").addEventListener("input", showTct);
+$("fPay").addEventListener("change", showTct);
+$("fTctPaid").addEventListener("input", () => { if (bill.length) showBillUI(); });
 $("fDateText").addEventListener("input", showTct); $("fDate").addEventListener("change", showTct);
 function billTotals(pending){
   const gross = Math.round(bill.concat(pending ? [pending] : []).reduce((a, it) => a + it.amount, 0) * 100) / 100;
@@ -3202,6 +3242,12 @@ $("billSave").addEventListener("click", async () => {
     if (share > 0) e.disc = share;
     return e;
   });
+  const paid = parseFloat($("fTctPaid").value);
+  if (tct && $("fTctPaid").value.trim() !== "" && paid >= 0){
+    const fulls = out.map(e => c2(e.amount + govs[e.id]));
+    if (paid > c2(fulls.reduce((a, f) => a + f, 0))){ toast("ยอดที่จ่ายจริงมากกว่าราคาเต็ม ลองดูอีกครั้งค่ะ", true); return; }
+    tctShare(fulls, paid).forEach((x, i) => { out[i].amount = x.ours; govs[out[i].id] = x.gov; });
+  }
   $("billSave").disabled = true;
   try {
     await store.save(out);
