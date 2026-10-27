@@ -424,7 +424,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="panel"><h2>รายจ่ายตามหมวด</h2><div id="ePie"></div></div>
       <div class="panel"><h2>จ่ายด้วยอะไร</h2><div id="ePiePay"></div></div>
     </div>
-    <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (รัฐออก 60% ไม่เกินวันละ 200 บาท)</h2><p class="hint" style="margin:0" id="tctSum"></p></div>
+    <div class="panel" id="tctPanel" hidden><h2>ไทยช่วยไทย (รัฐออก 60% ไม่เกินวันละ 200 และเดือนละ 1,000 บาท)</h2><p class="hint" style="margin:0" id="tctSum"></p><p class="hint" style="margin:4px 0 0;white-space:pre-line" id="tctMonths"></p><button class="btn sm" type="button" id="tctRecount" style="margin-top:8px">คิดใหม่ตามเพดานรายเดือน</button></div>
     <div class="panel"><div class="panel-head"><h2 id="eCalTitle">ปฏิทินรายจ่าย</h2><span class="hint">แตะวันที่เพื่อดูรายการของวันนั้น</span></div><div id="eCal"></div></div>
     <div class="panel"><div class="panel-head"><h2>รายการรายจ่าย</h2><button class="btn sm" type="button" id="eSelBtn">☑ เลือกรวมเป็นบิล</button><div class="chips" id="eChips"></div></div><div class="list" id="eList"></div></div>
   </section>
@@ -692,16 +692,24 @@ const DEF = {
     "ผ่อนจ่าย": ["TikTok Later","SPayLater","Lazada PayLater"]
   }
 };
-// ไทยช่วยไทย co-payment: the government pays 60% of the price but at most 200 baht a day in all; we pay the rest.
+// ไทยช่วยไทย co-payment: the government pays 60% of the price but at most 200 baht a day and 1,000 baht a month
+// in all; we pay the rest.
 // The entry's amount is what we paid (so spending totals are real money); the government's share is kept per entry
 // in synced settings (tctGov). Entries saved before that keep the plain 60/40 split.
-const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4, TCT_CAP = 200;
+const TCT = "ไทยช่วยไทย", TCT_OURS = 0.4, TCT_CAP = 200, TCT_MONTH = 1000;
 const isTct = e => e && e.kind === "expense" && e.pay === TCT;
 const c2 = v => Math.round(v * 100) / 100;
 const tctGovOf = e => { const m = e.tctGov != null ? e.tctGov : (settings.tctGov || {})[e.id]; return m != null ? Number(m) : c2((Number(e.amount) || 0) / TCT_OURS * (1 - TCT_OURS)); };
 const tctFull = e => c2((Number(e.amount) || 0) + tctGovOf(e));
 // government money already used on that day by other ไทยช่วยไทย entries
-const tctUsed = (date, skip = []) => c2(entries.filter(e => isTct(e) && e.date === date && !skip.includes(e.id)).reduce((a, e) => a + tctGovOf(e), 0));
+// what is left of the day's and the month's government money, without the entries in skip
+const tctLeft = (date, skip = []) => {
+  const g = f => c2(entries.filter(e => isTct(e) && f(e) && !skip.includes(e.id)).reduce((a, e) => a + tctGovOf(e), 0));
+  const day = g(e => e.date === date), month = g(e => (e.date || "").slice(0, 7) === (date || "").slice(0, 7));
+  return {day, month, room: Math.max(0, Math.min(c2(TCT_CAP - day), c2(TCT_MONTH - month)))};
+};
+// counted against the day's cap: the month's cap running out shows as the day's being used up
+const tctUsed = (date, skip = []) => c2(TCT_CAP - tctLeft(date, skip).room);
 const tctSplit = (full, used) => { const gov = Math.max(0, Math.min(c2(full * (1 - TCT_OURS)), c2(TCT_CAP - used))); return {gov, ours: c2(full - gov)}; };
 const setGov = m => store.setSetting("tctGov", {...(settings.tctGov || {}), ...m});
 // What we really paid, when the shop's ไทยช่วยไทย split differs from 60% (the day's cap used up elsewhere,
@@ -720,6 +728,28 @@ async function tctPutAll(list){
   const app = list.filter(x => x.e.src !== "sheet");
   if (app.length){ await store.save(app.map(({e, ours}) => ({...e, amount: ours, updatedAt: new Date().toISOString()}))); setGov(Object.fromEntries(app.map(({e, gov}) => [e.id, gov]))); }
 }
+// entries whose paid amount was typed in by hand: a recount leaves them as they are
+const tctMark = (ids, on) => { const m = {...(settings.tctManual || {})}; ids.forEach(id => { if (on) m[id] = 1; else delete m[id]; }); if (JSON.stringify(m) !== JSON.stringify(settings.tctManual || {})) store.setSetting("tctManual", m); };
+// Count every ไทยช่วยไทย entry again in date order with both caps; hand-typed ones keep their split but still use up the money.
+function tctRecount(){
+  const man = settings.tctManual || {}, L = entries.filter(isTct).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.id < b.id ? -1 : 1));
+  const day = {}, mon = {}, out = [];
+  for (const e of L){
+    const d = e.date, m = d.slice(0, 7), full = tctFull(e);
+    let gov = tctGovOf(e);
+    if (!man[e.id]) gov = Math.max(0, Math.min(c2(full * (1 - TCT_OURS)), c2(TCT_CAP - (day[d] || 0)), c2(TCT_MONTH - (mon[m] || 0))));
+    day[d] = c2((day[d] || 0) + gov); mon[m] = c2((mon[m] || 0) + gov);
+    if (Math.abs(gov - tctGovOf(e)) > 0.004) out.push({e, full, gov, ours: c2(full - gov), was: Number(e.amount)});
+  }
+  return out;
+}
+document.getElementById("tctRecount").addEventListener("click", async () => {
+  const ch = tctRecount();
+  if (!ch.length){ alert("ทุกรายการคิดตามเพดานวันละ 200 และเดือนละ 1,000 บาทอยู่แล้วค่ะ"); return; }
+  const txt = ch.slice(0, 12).map(x => `${thaiDate(x.e.date)} ${x.e.note || x.e.name}: เราจ่าย ${fmt(x.was)} → ${fmt(x.ours)}`).join("\n") + (ch.length > 12 ? `\n…อีก ${ch.length - 12} รายการ` : "");
+  if (!confirm(`คิดใหม่ตามเพดานวันละ 200 และเดือนละ 1,000 บาท จะเปลี่ยน ${ch.length} รายการ\n\n${txt}\n\nรายการที่ใส่ "เราจ่ายจริง" เองจะไม่ถูกเปลี่ยน`)) return;
+  try { await tctPutAll(ch); render(); } catch (err){ alert(err.message); }
+});
 const tctBillMates = () => editing?.billId ? entries.filter(x => x.billId === editing.billId && x.id !== editing.id && isTct(x)) : [];
 const PAYS = {expense: ["เงินสด","โอน/สแกนจ่าย","บัตรเครดิต","ผ่อนจ่าย",TCT], income: ["เงินสด","โอน/สแกนจ่าย"], saving: ["โอน/สแกนจ่าย","เงินสด"]};
 const BIZ_LABEL = {Muan: "Muan (ร้านคาเฟ่)"};
@@ -1862,6 +1892,9 @@ function renderExpense(P){
   if (tct.length){
     const ours = r2(tct.reduce((a, e) => a + Number(e.amount), 0)), full = r2(tct.reduce((a, e) => a + tctFull(e), 0));
     $("tctSum").textContent = `${tct.length} รายการ · ราคาเต็ม ${fmt(full)} · เราจ่าย ${fmt(ours)} · รัฐออกให้ ${fmt(r2(full - ours))} บาท`;
+    // each month's government money against the 1,000 baht a month
+    const ms = [...new Set(tct.map(e => e.date.slice(0, 7)))].sort();
+    $("tctMonths").textContent = ms.map(m => { const g = c2(entries.filter(e => isTct(e) && e.date.slice(0, 7) === m).reduce((a, e) => a + tctGovOf(e), 0)); return `${TH_MONTHS[+m.slice(5) - 1]} รัฐออกให้ ${fmt(g)} จาก 1,000 · เหลือ ${fmt(Math.max(0, c2(TCT_MONTH - g)))} บาท`; }).join("\n");
   }
   const cy = calYM(); $("eCalTitle").textContent = `ปฏิทินรายจ่าย ${TH_MONTHS[+cy.slice(5) - 1]} ${cy.slice(0,4)}`;
   calendar($("eCal"), cy, pickDay);
@@ -3008,7 +3041,7 @@ $("entryForm").addEventListener("submit", async ev => {
   if (kind === "saving"){ base.side = $("fSide").value; base.group = pickVal(pk.group); if ($("fWho").value === PARTNER) base.who = PARTNER; }
   base.pay = $("fPay").value;
   let govNow = null;
-  let tctMates = [];
+  let tctMates = [], tctManualNow = false;
   if (kind === "expense" && base.pay === TCT){
     const sp = tctSplit(amount, tctUsed(date, editing ? [editing.id] : [])); base.amount = sp.ours; govNow = sp.gov;
     const paid = parseFloat($("fTctPaid").value);
@@ -3018,6 +3051,7 @@ $("entryForm").addEventListener("submit", async ev => {
       const sh = tctShare(fulls, paid);
       base.amount = sh[0].ours; govNow = sh[0].gov;
       tctMates = mates.map((e, i) => ({e, full: fulls[i + 1], ...sh[i + 1]}));
+      tctManualNow = true;
     }
   }
   const acc = pickVal(pk.acc); if (acc && base.pay !== "เงินสด" && base.pay !== TCT) base.account = acc;
@@ -3041,7 +3075,7 @@ $("entryForm").addEventListener("submit", async ev => {
     // the sheet keeps the full price; on screen a ไทยช่วยไทย row counts only what we paid
     const shown = govNow != null ? {...upd, amount: base.amount, tctGov: govNow, sheetAmount: amount} : upd;
     // overlay first: saving the row re-renders, and the old overlay would be put back on it
-    try { if (kind !== "saving"){ const before = {...editing}; setSheetPay(was, {...shown}); await billPayAll(before, upd); } await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); if (tctMates.length) await tctPutAll(tctMates); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
+    try { if (kind !== "saving"){ const before = {...editing}; setSheetPay(was, {...shown}); await billPayAll(before, upd); } await (touched ? store.sheetEdit(was, {...upd}) : store.sheetLocal(was, {...shown})); rememberSizes([upd]); if (tctMates.length) await tctPutAll(tctMates); if (govNow != null) tctMark([upd.id, ...tctMates.map(x => x.e.id)], tctManualNow); setFollow([upd.id], $("fFollow").checked); if (kind === "expense") setPL([{e: upd, was: editing}], $("fPL").checked, $("fPLDue").value); $("dlg").close(); } catch (err){ toast(err.message, true); }
     return;
   }
   const out = [];
@@ -3067,6 +3101,7 @@ $("entryForm").addEventListener("submit", async ev => {
     rememberSizes(out);
     if (govNow != null) setGov({[out[0].id]: govNow});
     if (tctMates.length) await tctPutAll(tctMates);
+    if (govNow != null) tctMark([out[0].id, ...tctMates.map(x => x.e.id)], tctManualNow);
     const fu = $("fFollow").checked; setFollow(out.map(x => x.id), fu); $("fFollow").checked = false;
     setMemo(out.map(x => x.id), $("fMemo").value.trim());
     if (kind === "expense" && ($("fPL").checked || editing)) setPL(out.map(x => ({e: x, was: editing})), $("fPL").checked, $("fPLDue").value);
@@ -3145,9 +3180,10 @@ function showTct(){
   }
   h.hidden = !on || bill.length > 0 || !(full > 0);
   if (!h.hidden){
-    const used = tctUsed($("fDate").value, editing ? [editing.id] : []), sp = tctSplit(full, used);
+    const lf = tctLeft($("fDate").value, editing ? [editing.id] : []), sp = tctSplit(full, c2(TCT_CAP - lf.room));
     const capped = sp.gov < c2(full * (1 - TCT_OURS));
-    h.textContent = `ไทยช่วยไทย: รัฐออกให้ ${fmt(sp.gov)} บาท · เราจ่ายเอง ${fmt(sp.ours)} บาท` + (capped ? ` (รัฐออก 60% แต่ไม่เกินวันละ ${TCT_CAP} บาท${used ? `, วันนี้ใช้สิทธิ์ไปแล้ว ${fmt(used)} บาท` : ""})` : " (รัฐออก 60%)") + " · รายจ่ายนับเฉพาะที่เราจ่ายเอง";
+    h.textContent = `ไทยช่วยไทย: รัฐออกให้ ${fmt(sp.gov)} บาท · เราจ่ายเอง ${fmt(sp.ours)} บาท` + (capped ? ` (รัฐออก 60% แต่ไม่เกินวันละ ${TCT_CAP} และเดือนละ 1,000 บาท)` : " (รัฐออก 60%)")
+      + ` · สิทธิ์เหลือ วันนี้ ${fmt(Math.max(0, c2(TCT_CAP - lf.day)))} · เดือนนี้ ${fmt(Math.max(0, c2(TCT_MONTH - lf.month)))} บาท · รายจ่ายนับเฉพาะที่เราจ่ายเอง`;
   }
 }
 $("fAmount").addEventListener("input", showTct);
@@ -3243,16 +3279,18 @@ $("billSave").addEventListener("click", async () => {
     return e;
   });
   const paid = parseFloat($("fTctPaid").value);
+  let tctManualBill = false;
   if (tct && $("fTctPaid").value.trim() !== "" && paid >= 0){
     const fulls = out.map(e => c2(e.amount + govs[e.id]));
     if (paid > c2(fulls.reduce((a, f) => a + f, 0))){ toast("ยอดที่จ่ายจริงมากกว่าราคาเต็ม ลองดูอีกครั้งค่ะ", true); return; }
     tctShare(fulls, paid).forEach((x, i) => { out[i].amount = x.ours; govs[out[i].id] = x.gov; });
+    tctManualBill = true;
   }
   $("billSave").disabled = true;
   try {
     await store.save(out);
     rememberSizes(out);
-    if (tct) setGov(govs);
+    if (tct){ setGov(govs); tctMark(out.map(x => x.id), tctManualBill); }
     if ($("fFollow").checked){ setFollow(out.map(x => x.id), true); $("fFollow").checked = false; }
     if ($("fPL").checked) setPL(out.map(x => ({e: x})), true, $("fPLDue").value);
     if (oldIds.length) await store.remove(oldIds);
