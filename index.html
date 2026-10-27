@@ -1062,7 +1062,8 @@ function entryList(box, list, key){
       const items = rows.filter(x => x.billId === e.billId);
       const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0), net = items.reduce((a, x) => a + (Number(x.amount) || 0), 0);
       const hd = el("div", "billrow");
-      const ht = el("span", "", `🧾 บิล${e.shop ? " " + e.shop : ""} · ${items.length} รายการ${disc ? ` · ลด ${fmt(disc)}` : ""}`); ht.append(el("span", "edit", "✎ แก้"));
+      const bs = billShop(items);
+      const ht = el("span", "", `🧾 บิล${bs ? " " + bs : ""} · ${items.length} รายการ${disc ? ` · ลด ${fmt(disc)}` : ""}`); ht.append(el("span", "edit", "✎ แก้"));
       hd.append(ht, el("span", "num", "รวม " + fmt(net)));
       hd.classList.add("tap"); hd.tabIndex = 0; hd.setAttribute("role", "button"); hd.title = "แตะเพื่อแก้ทั้งบิล";
       const bid = e.billId;
@@ -1085,7 +1086,42 @@ function entryList(box, list, key){
 }
 // One bill is paid one way: changing the bank (or how it was paid) on one item changes the whole bill.
 // Not for ไทยช่วยไทย or installments, which work out each item's amount on their own.
+let shopFillBusy = false;
+// one bill is one shop: the shop most of its items name
+function billShop(items){
+  const n = new Map(); items.forEach(x => { if (x.shop) n.set(x.shop, (n.get(x.shop) || 0) + 1); });
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+}
+// give each listed entry this shop: rows from the sheet through the app's notes about them, the app's own saved
+async function putShop(list, shop){
+  const was = shopFillBusy; shopFillBusy = true;
+  try { await putShopNow(list, shop); } finally { shopFillBusy = was; }
+}
+async function putShopNow(list, shop){
+  list = list.filter(x => (x.shop || "") !== shop);
+  const rows = list.filter(x => x.src === "sheet");
+  if (rows.length){
+    const m = rows.reduce((m, e) => setSheetPay({...e, amount: sheetAmt(e)}, {...e, shop}, m), {...sheetPays()});
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  const app = list.filter(x => x.src !== "sheet").map(x => { const y = {...x, updatedAt: new Date().toISOString()}; if (shop) y.shop = shop; else delete y.shop; return y; });
+  if (app.length) await store.save(app);
+}
+// bills made before this rule: items with no shop take the bill's
+function fillBillShops(){
+  if (shopFillBusy) return;
+  const by = new Map(); entries.forEach(x => { if (x.billId && x.kind === "expense") (by.get(x.billId) || by.set(x.billId, []).get(x.billId)).push(x); });
+  const todo = [];
+  by.forEach(items => { const s = billShop(items); if (s && items.some(x => !x.shop)) todo.push([items.filter(x => !x.shop), s]); });
+  if (!todo.length) return;
+  shopFillBusy = true;
+  setTimeout(async () => { try { for (const [l, s] of todo) await putShopNow(l, s); } catch (err){ console.warn(err); } shopFillBusy = false; render(); }, 0);
+}
 async function billPayAll(was, now){
+  if (was.billId && was.kind === "expense" && (now.shop || "") !== (was.shop || "")){
+    // a new shop on one item is the shop of the whole bill
+    await putShop(entries.filter(x => x.billId === was.billId && x.id !== was.id), now.shop || "");
+  }
   if (!was.billId || was.kind !== "expense" || [TCT, "ผ่อนจ่าย"].includes(now.pay)) return;
   if ((now.pay || "") === (was.pay || "") && (now.account || "") === (was.account || "")) return;
   const sib = entries.filter(x => x.billId === was.billId && x.id !== was.id && x.pay !== TCT && !x.instId);
@@ -1126,7 +1162,8 @@ $("selMerge").addEventListener("click", async () => {
   const L = entries.filter(e => selIds.has(e.id));
   if (new Set(L.map(e => e.date)).size > 1){ alert("รายการที่จะรวมเป็นบิลเดียวต้องเป็นวันเดียวกันค่ะ"); return; }
   const id = (L.find(e => e.billId) || {}).billId || "b" + Date.now().toString(36);
-  try { await setBill(L, id); selMode = false; selIds = new Set(); render(); } catch (err){ alert(err.message); }
+  const sh = billShop([...L, ...entries.filter(e => e.billId === id && !selIds.has(e.id))]);
+  try { await setBill(L, id); if (sh) await putShop(entries.filter(e => e.billId === id || selIds.has(e.id)).map(e => ({...e, billId: id})), sh); selMode = false; selIds = new Set(); render(); } catch (err){ alert(err.message); }
 });
 $("selSplit").addEventListener("click", async () => {
   const L = entries.filter(e => selIds.has(e.id) && e.billId);
@@ -1222,6 +1259,7 @@ function setSheetPay(orig, upd, into){
 }
 function render(){
   sheetPayApply();
+  fillBillShops();
   selBar();
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
