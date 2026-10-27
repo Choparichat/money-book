@@ -165,6 +165,12 @@ table.ledger tr.future td{opacity:.6}
 .day .wd{display:inline-block;min-width:2.4em;margin-right:4px;padding:1px 6px;border-radius:6px;background:var(--sunk);font-size:.8rem;text-align:center}
 .day .sum{font-size:.85rem;font-weight:600;color:var(--muted)}
 .day .sum b{color:var(--fg)}
+.day.tap{cursor:pointer}.day.tap:hover .wd,.day.tap:focus-visible .wd{background:var(--line)}
+.daybody{display:grid;gap:10px;padding:16px;overflow:auto;max-height:calc(100dvh - 18px)}
+.daysum{display:flex;gap:8px;flex-wrap:wrap}.dsum{padding:4px 10px;border-radius:8px;background:var(--sunk);font-size:.9rem}
+.dsum.inc b{color:var(--inc,#4caf50)}.dsum.exp b{color:var(--exp,#e57373)}
+.dayh{margin:6px 0 0;font-size:.95rem}
+.daydlg .day{display:none}
 .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 .cal .wh{font-size:.72rem;color:var(--muted);text-align:center;padding:2px 0}
 .cal button{position:relative;display:grid;align-content:start;gap:1px;min-height:54px;padding:4px 3px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:inherit;text-align:left;cursor:pointer;overflow:hidden}
@@ -562,6 +568,15 @@ details summary{cursor:pointer;font-weight:500}
 <button class="fab" type="button" id="fab">＋ เพิ่มรายการ</button>
 <div class="selbar" id="selBar" hidden><span id="selInfo"></span><div class="selbtns"><button class="btn primary sm" type="button" id="selMerge">รวมเป็นบิลเดียว</button><button class="btn sm" type="button" id="selSplit">แยกออกจากบิล</button><button class="btn sm" type="button" id="selCancel">เสร็จ</button></div></div>
 
+<dialog id="dayDlg" class="daydlg" aria-labelledby="dayTitle">
+  <div class="daybody">
+    <div class="dhead"><h2 id="dayTitle">วันนี้</h2><button class="x" type="button" id="dayClose" aria-label="ปิด">×</button></div>
+    <div class="daysum" id="daySum"></div>
+    <p class="hint">แตะรายการเพื่อแก้ไข</p>
+    <div id="dayList"></div>
+    <button class="btn primary" type="button" id="dayAdd">＋ เพิ่มรายการวันนี้</button>
+  </div>
+</dialog>
 <dialog id="dlg" aria-labelledby="formTitle">
   <form id="entryForm" autocomplete="off" method="dialog">
     <div class="dhead"><h2 id="formTitle">เพิ่มรายการ</h2><button class="x" type="button" id="dlgClose" aria-label="ปิด">×</button></div>
@@ -1055,6 +1070,7 @@ function entryList(box, list, key){
       const l = el("span"); l.append(el("span", "wd", weekday(day)), document.createTextNode(thaiDate(day)));
       const r = el("span", "sum"); r.append(document.createTextNode("รวมวันนี้ "), el("b", "num", fmt(dayTotal)));
       d.append(l, r); box.append(d);
+      if (key !== "dayview"){ const dd = day; d.classList.add("tap"); d.tabIndex = 0; d.setAttribute("role", "button"); d.title = "แตะเพื่อดูและแก้รายการทั้งวัน"; d.addEventListener("click", () => openDay(dd)); d.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); openDay(dd); } }); }
     }
     if (e.billId){
       // one shopping trip: a header with the bill total, then each item
@@ -1257,9 +1273,32 @@ function setSheetPay(orig, upd, into){
   if (!into && JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
   return m;
 }
+/* ---------- one day: everything in and out on that date, tap a row to edit ---------- */
+let dayOpen = "";
+function openDay(iso){ dayOpen = iso; renderDay(); if (!$("dayDlg").open) $("dayDlg").showModal(); }
+function renderDay(){
+  if (!dayOpen) return;
+  const L = entries.filter(e => e.date === dayOpen && e.kind !== "transfer");
+  const sum = k => L.filter(e => e.kind === k).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+  $("dayTitle").textContent = `${weekday(dayOpen)} ${thaiDate(dayOpen)}`;
+  const s = $("daySum"); s.textContent = "";
+  [["income", "รายรับ", "inc"], ["expense", "รายจ่าย", "exp"]].forEach(([k, t, c]) => { const b = el("span", "dsum " + c); b.append(t + " ", el("b", "num", fmt(sum(k)))); s.append(b); });
+  const bx = $("dayList"); bx.textContent = "";
+  [["income", "รายรับ"], ["expense", "รายจ่าย"], ["saving", "ลงทุน/ออม"]].forEach(([k, t]) => {
+    const list = L.filter(e => e.kind === k);
+    if (!list.length && k === "saving") return;
+    bx.append(el("h3", "dayh", `${t} ${list.length} รายการ`));
+    const lb = el("div", "list"); bx.append(lb);
+    if (list.length) entryList(lb, list, "dayview"); else lb.append(el("div", "empty", "ไม่มี" + t + "วันนี้"));
+  });
+}
+$("dayClose").addEventListener("click", () => $("dayDlg").close());
+$("dayDlg").addEventListener("close", () => { dayOpen = ""; });
+$("dayAdd").addEventListener("click", () => { const d = dayOpen; openForm(null); $("fDate").value = d; $("fDate").dispatchEvent(new Event("change")); });
 function render(){
   sheetPayApply();
   fillBillShops();
+  renderDay();
   selBar();
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
@@ -3106,7 +3145,7 @@ function openBill(billId){
   const items = entries.filter(x => x.billId === billId).sort((a, b) => (a.id < b.id ? -1 : 1));
   if (!items.length) return;
   // a bill made by grouping rows from the sheet: rows stay as they are, so offer to ungroup instead
-  if (items.some(x => x.src === "sheet")){ selMode = true; selIds = new Set(items.map(x => x.id)); render(); return; }
+  if (items.some(x => x.src === "sheet")){ if ($("dayDlg").open) $("dayDlg").close(); selMode = true; selIds = new Set(items.map(x => x.id)); render(); return; }
   const f = items[0];
   openForm(null);
   setKind("expense", true);
