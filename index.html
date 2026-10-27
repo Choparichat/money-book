@@ -2767,19 +2767,24 @@ onPick(pk.note, () => {
   // Same item as before: start from the last unit, shop and price paid.
   const n = pickVal(pk.note);
   shopPriceHint();
-  if (kind !== "expense" || !n || editing) return;
+  if (kind !== "expense" || !n) return;
   // each shop has its own price: with a shop picked, start from what was paid there
-  const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n).sort((a,b) => a.date < b.date ? 1 : -1);
-  const last = (shop && all.find(e => e.shop === shop)) || (shop ? null : all[0]);
-  if (!all.length) return;
-  if (last && last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
-  const ref = last || all[0];
-  if (ref.unit) setPick(pk.unit, ref.unit);
-  if (!shop && ref.shop) setPick(pk.shop, ref.shop);
+  const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n && (!editing || e.id !== editing.id)).sort((a,b) => a.date < b.date ? 1 : -1);
+  // the unit and the size per unit come back every time, from the last entry that had them;
+  // editing an entry only fills what is still empty, so nothing typed there is replaced
+  if (!editing){
+    const last = (shop && all.find(e => e.shop === shop)) || (shop ? null : all[0]);
+    if (last && last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
+    const ref = last || all[0];
+    if (!shop && ref && ref.shop) setPick(pk.shop, ref.shop);
+  }
+  const u = ((shop && all.find(e => e.shop === shop && e.unit)) || all.find(e => e.unit) || {}).unit;
+  if (u && !(editing && pickVal(pk.unit))) setPick(pk.unit, u);
   shopPriceHint();
-  const sz = entries.filter(e => e.kind === "expense" && e.note === n && e.size > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
-  const zz = sz ? {size: sz.size, unit: sz.sizeUnit || "ml"} : sizeOf({note: n});
-  if (zz){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
+  // the size last remembered for this item, else the newest entry that had one
+  const sz = all.find(e => e.size > 0);
+  const zz = sizeRaw({note: n}) || (sz ? {size: sz.size, unit: sz.sizeUnit || "ml"} : null);
+  if (zz && (!editing || !$("fSize").value)){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   updateAmount(); showSize();
 });
 // the last price paid for this item at each shop, under the item
