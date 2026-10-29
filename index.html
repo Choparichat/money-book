@@ -301,6 +301,7 @@ dialog{border:1px solid var(--line);border-radius:16px;padding:0;background:var(
 dialog::backdrop{background:rgba(0,0,0,.45)}
 dialog form{display:grid;gap:10px;padding:16px;overflow:auto}
 .dhead{display:flex;justify-content:space-between;align-items:center}
+.draftbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:var(--exp-soft);color:var(--fg);font-size:.9rem}
 .x{border:0;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--muted);width:36px;height:36px}
 .snap{display:grid;gap:6px;background:var(--sunk);border-radius:8px;padding:8px 10px}
 .snapitems{display:grid;gap:6px;background:var(--surface);border-radius:8px;padding:8px 10px}
@@ -585,6 +586,7 @@ details summary{cursor:pointer;font-weight:500}
 <dialog id="dlg" aria-labelledby="formTitle">
   <form id="entryForm" autocomplete="off" method="dialog">
     <div class="dhead"><h2 id="formTitle">เพิ่มรายการ</h2><button class="x" type="button" id="dlgClose" aria-label="ปิด">×</button></div>
+    <div class="draftbar" id="draftBar" hidden><span id="draftText"></span><span class="selbtns"><button class="btn primary sm" type="button" id="draftUse">กู้คืน</button><button class="btn sm" type="button" id="draftDrop">ทิ้ง</button></span></div>
     <div class="seg" role="group" aria-label="ประเภท" id="kindSeg" style="width:100%;grid-template-columns:repeat(3,1fr)">
       <button type="button" data-k="income" aria-pressed="false">รายรับ</button>
       <button type="button" data-k="expense" aria-pressed="true">รายจ่าย</button>
@@ -3001,10 +3003,43 @@ function openForm(e){
   { const t = e && plTagOf(e); $("fPL").checked = !!t; $("fPLDue").value = t ? t[1].due : plDefaultDue($("fDate").value || todayISO); $("plDueField").hidden = !t; }
   bill = []; billSlot = null; $("billDisc").value = ""; showBillUI();
   updateInstHint();
+  showDraft();
 }
+/* ---------- a form closed before บันทึก: keep what was typed so it can be brought back ---------- */
+const DRAFT = "money-book-draft";
+function draftNow(){
+  if (editing || billEdit || kind === "saving") return null;
+  const cur = itemFromForm(), items = [...bill, ...(cur ? [cur] : [])];
+  if (!items.length) return null;
+  return {t: Date.now(), kind, date: $("fDate").value, shop: pickVal(pk.shop), pay: $("fPay").value, acc: pickVal(pk.acc), disc: $("billDisc").value, memo: $("fMemo").value, items};
+}
+function readDraft(){ try { const d = JSON.parse(localStorage.getItem(DRAFT) || "null"); return d && d.items?.length && Date.now() - d.t < 14 * 864e5 ? d : null; } catch { return null; } }
+function showDraft(){
+  const bar = $("draftBar"), d = !editing && readDraft();
+  bar.hidden = !d; if (!d) return;
+  const total = d.items.reduce((a, x) => a + (Number(x.amount) || 0), 0), names = d.items.map(x => x.note || x.name).join(", ");
+  $("draftText").textContent = `ยังไม่ได้บันทึก: ${names} · ${fmt(total)} บาท (วันที่ ${thaiDate(d.date)})`;
+}
+$("draftUse").addEventListener("click", () => {
+  const d = readDraft(); if (!d) return;
+  setKind(d.kind, true); $("fDate").value = d.date; if (d.shop) setPick(pk.shop, d.shop);
+  fillPays(d.pay || ""); if (d.pay) $("fPay").value = d.pay; fillAcc(d.acc || "");
+  $("fMemo").value = d.memo || "";
+  const last = d.items.length === 1 ? d.items[0] : null;
+  bill = last ? [] : d.items.slice(); billSlot = null; $("billDisc").value = d.disc || "";
+  if (last){ itemToForm(last); } 
+  try { localStorage.removeItem(DRAFT); } catch {}
+  $("draftBar").hidden = true; showBillUI(); showTct();
+  toast(last ? "กู้คืนแล้ว ตรวจดูแล้วกด บันทึก" : `กู้คืน ${d.items.length} รายการในบิลแล้ว ตรวจดูแล้วกด บันทึกบิล`);
+});
+$("draftDrop").addEventListener("click", () => { try { localStorage.removeItem(DRAFT); } catch {} $("draftBar").hidden = true; });
 $("fab").addEventListener("click", () => openForm(null));
 $("dlgClose").addEventListener("click", () => $("dlg").close());
-$("dlg").addEventListener("close", () => { editing = null; if (billEdit){ billEdit = null; bill = []; billSlot = null; $("billDisc").value = ""; } $("billTitle").textContent = "บิลนี้"; });
+$("dlg").addEventListener("close", () => {
+  const d = draftNow();
+  try { if (d) localStorage.setItem(DRAFT, JSON.stringify(d)); } catch {}
+  if (d) flash(`ยังไม่ได้บันทึก ${d.items.map(x => x.note || x.name).join(", ")} เก็บไว้ให้แล้ว กด ＋ เพิ่มรายการ เพื่อกู้คืน`);
+  editing = null; if (billEdit){ billEdit = null; bill = []; billSlot = null; $("billDisc").value = ""; } $("billTitle").textContent = "บิลนี้"; });
 
 function flash(msg){ $("storeNote").textContent = msg; $("storeNote").style.color = "var(--exp)"; clearTimeout(flash.t); flash.t = setTimeout(() => { $("storeNote").style.color = ""; store?.status?.(); }, 3500); }
 function toast(msg, bad){ const t = $("toast"); t.textContent = msg; t.style.color = bad ? "var(--exp)" : "var(--muted)"; }
