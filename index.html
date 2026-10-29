@@ -562,6 +562,11 @@ details summary{cursor:pointer;font-weight:500}
       <div class="actions"><button class="btn" type="button" id="exportBtn">ส่งออก CSV ทั้งหมด</button><label class="btn" for="restoreFile">กู้คืนจากไฟล์ CSV</label><input id="restoreFile" type="file" accept=".csv,text/csv" hidden></div>
       <div class="actions"><button class="btn danger" type="button" id="restoreGo" hidden></button><span class="hint" id="restoreMsg"></span></div>
     </div>
+    <div class="panel">
+      <h2>ส่งวัตถุดิบไปแอปคำนวณต้นทุน</h2>
+      <p class="hint" style="margin:0">ส่งออกรายการซื้อของร้าน Muan (ค่าวัตถุดิบ ค่าบรรจุภัณฑ์ ค่าอุปกรณ์) พร้อมจำนวน ราคา และขนาดบรรจุ เป็นไฟล์ แล้วไปกด “นำเข้าจากสมุดรายรับ-รายจ่าย” ในแอปคำนวณต้นทุน</p>
+      <div class="actions"><button class="btn" type="button" id="costExportBtn">ส่งออกวัตถุดิบ Muan</button><span class="hint" id="costExportMsg"></span></div>
+    </div>
   </section>
 </main>
 
@@ -3361,6 +3366,25 @@ $("exportBtn").addEventListener("click", () => {
   a.download = `รายรับรายจ่าย-${todayISO}.csv`;
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+// Muan purchases for the drink cost calculator: every bought item with its price, count and package size
+// (the size typed on the entry, else the one remembered for that item), so the calculator can set its own prices.
+const COST_CATS = ["ค่าวัตถุดิบ", "ค่าบรรจุภัณฑ์", "ค่าอุปกรณ์", "Muan"];
+$("costExportBtn").addEventListener("click", () => {
+  const items = allEntries.filter(e => e.kind === "expense" && bizOf(e) === "Muan" && COST_CATS.includes(e.name) && (e.note || "").trim() && Number(e.amount) > 0)
+    .sort((a, b) => a.date < b.date ? -1 : 1)
+    .map(e => { const z = sizeRaw(e), o = {date: e.date, cat: e.name, item: e.note.trim(), amount: Number(e.amount)};
+      for (const k of ["qty", "unit", "unitPrice", "shop"]) if (e[k]) o[k] = e[k];
+      if (z){ o.size = z.size; o.sizeUnit = z.unit; }
+      return o; });
+  if (!items.length){ $("costExportMsg").textContent = "ยังไม่มีรายการซื้อของร้าน Muan"; return; }
+  const json = JSON.stringify({app: "money-book", type: "muan-purchases", version: 1, exportedAt: new Date().toISOString(), items}, null, 1);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([json], {type: "application/json"}));
+  a.download = `วัตถุดิบ-Muan-${todayISO}.json`;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  $("costExportMsg").textContent = `ส่งออก ${items.length} รายการ (${new Set(items.map(o => o.item)).size} ชนิด)`;
 });
 function parseCSV(text){
   const rows = []; let row = [], cur = "", q = false;
