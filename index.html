@@ -232,7 +232,10 @@ table.ledger tr.future td{opacity:.6}
 .more{justify-self:center;margin-top:8px}
 
 table{border-collapse:collapse;width:100%;font-size:.88rem}
-.scroll table.cost{min-width:0}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+.scroll table.cost{min-width:0}
+table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
+table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -495,6 +498,16 @@ details summary{cursor:pointer;font-weight:500}
       <div class="scroll"><table class="cost">
         <thead><tr><th>วัตถุดิบ</th><th class="n">ล่าสุด</th><th class="n">เฉลี่ย</th><th class="n">แนวโน้ม</th></tr></thead>
         <tbody id="mCost"></tbody>
+      </table></div>
+    </div>
+    <div class="panel srch">
+      <h2>เทียบราคาระหว่างร้าน</h2>
+      <div class="hint">ของชิ้นเดียวกันที่เคยซื้อจากหลายร้าน ราคาที่จ่ายจริงครั้งล่าสุดของแต่ละร้าน (ไม่จำกัดเดือน) ถ้าขนาดบรรจุต่างกันจะเทียบต่อลิตร / กก.</div>
+      <input type="search" id="cmpSearch" placeholder="🔍 ค้นหาสินค้า หรือร้าน" aria-label="ค้นหาสินค้าที่จะเทียบราคา" autocomplete="off" style="margin:8px 0">
+      <label class="hint cmp-one"><input type="checkbox" id="cmpOne"> แสดงของที่ซื้อร้านเดียวด้วย</label>
+      <div class="scroll"><table class="cost cmp">
+        <thead><tr><th>ร้าน</th><th class="n">ราคาล่าสุด</th><th class="n">เทียบ</th></tr></thead>
+        <tbody id="mCmp"></tbody>
       </table></div>
     </div>
     <div class="panel"><h2>รายการของร้าน</h2><div class="list" id="mList"></div></div>
@@ -2063,6 +2076,7 @@ function renderShop(P){
   const tf = $("mItemsFoot"); tf.textContent = "";
   if (sorted.length){ const tr = el("tr"); [["รวม", ""], ["", "n"], ["", "n"], [fmt(s.exp), "n"], ["", ""]].forEach(([t, c]) => tr.append(el("td", c, t))); tf.append(tr); }
   renderCost(all, itemKey);
+  renderCompare(all, itemKey);
   entryList($("mList"), L, "shop");
 }
 function renderCost(all, itemKey){
@@ -2083,6 +2097,77 @@ function renderCost(all, itemKey){
     tb.append(tr);
   }
 }
+
+// The same item bought at more than one shop: the latest price paid at each, cheapest first.
+// Compared per ml / g when every shop's purchase has a size, else per unit bought.
+let cmpAll = [], cmpKey = e => e.note;
+const CMP_BASE = {ml: ["ลิตร", 1000], g: ["กก.", 1000]};
+function paidPer(e){
+  const a = Number(e.amount) || 0, q = Number(e.qty) || 0, c = costPer(e);
+  return {unit: q > 0 ? a / q : a, u: e.unit || "", c};
+}
+function renderCompare(all, itemKey){
+  if (all) { cmpAll = all; cmpKey = itemKey; }
+  const q = thaiFold($("cmpSearch").value).trim().toLowerCase(), one = $("cmpOne").checked;
+  const by = new Map();
+  for (const e of cmpAll){
+    if (!e.shop || !(Number(e.amount) > 0)) continue;
+    const k = (cmpKey(e) || "").trim(); if (!k) continue;
+    const m = by.get(k) || by.set(k, new Map()).get(k);
+    (m.get(e.shop) || m.set(e.shop, []).get(e.shop)).push(e);
+  }
+  const tb = $("mCmp"); tb.textContent = "";
+  const rows = [];
+  for (const [name, shops] of by){
+    if (shops.size < 2 && !one) continue;
+    if (q && ![name, ...shops.keys()].some(t => thaiFold(t).toLowerCase().includes(q))) continue;
+    const list = [...shops.entries()].map(([shop, xs]) => {
+      xs.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+      return {shop, xs, last: xs[0], p: xs.map(paidPer)};
+    });
+    // packs of different sizes: compare per litre / kg (or per piece); same size: per pack bought
+    const sz = p => p.c ? p.c.size + " " + p.c.unit : "";
+    const sameSize = new Set(list.map(s => sz(s.p[0]) + "|" + s.p[0].u)).size === 1;
+    const base = !sameSize && list.every(s => s.p[0].c) && new Set(list.map(s => s.p[0].c.base)).size === 1 ? list[0].p[0].c.base : "";
+    const k = CMP_BASE[base] || [base, 1];
+    const val = p => base ? (p.c && p.c.base === base ? p.c.per * k[1] : null) : p.unit;
+    list.forEach(s => { s.v = val(s.p[0]); const vs = s.p.map(val).filter(v => v != null); s.min = vs.length ? Math.min(...vs) : s.v; });
+    list.sort((a, b) => a.v - b.v);
+    const units = new Set(list.map(s => s.p[0].u).filter(Boolean));
+    const unit = base ? k[0] : (units.size === 1 ? [...units][0] : "");
+    rows.push({name, list, base, unit, size: sameSize ? sz(list[0].p[0]) : "", mixed: !base && units.size > 1, n: list.reduce((a, s) => a + s.xs.length, 0)});
+  }
+  if (!rows.length){
+    const tr = el("tr"), td = el("td", "empty", q ? "ไม่พบสินค้าที่ค้นหา" : "ยังไม่มีของที่ซื้อจากหลายร้าน ใส่ชื่อร้านตอนบันทึกรายจ่าย แล้วของชิ้นเดียวกันที่ซื้อต่างร้านจะมาเทียบกันที่นี่");
+    td.colSpan = 3; tr.append(td); tb.append(tr); return;
+  }
+  // items with the biggest gap between shops first
+  const gap = r => r.list.length > 1 && r.list[0].v > 0 ? r.list[r.list.length - 1].v / r.list[0].v : 0;
+  rows.sort((a, b) => gap(b) - gap(a) || b.n - a.n || a.name.localeCompare(b.name, "th"));
+  
+  for (const r of rows){
+    const h = el("tr", "ci"), td = el("td", "", r.name + (r.size ? ` (${r.size})` : "")); td.colSpan = 3;
+    const best = r.list[0];
+    if (r.list.length > 1){
+      const save = r.list[r.list.length - 1].v - best.v;
+      td.append(el("div", "hint", save > 0 ? `${best.shop} ถูกสุด · ต่างกันสูงสุด ${fmtC(save)} บาท${r.unit ? "/" + r.unit : ""}` : "ราคาเท่ากันทุกร้าน"));
+    } else if (r.unit) td.append(el("div", "hint", `ราคาต่อ${r.unit}`));
+    if (r.mixed) td.append(el("div", "hint", "⚠ แต่ละร้านนับหน่วยไม่เหมือนกัน ใส่ขนาดบรรจุเพื่อเทียบต่อลิตร / กก."));
+    h.append(td); tb.append(h);
+    r.list.forEach((s, i) => {
+      const tr = el("tr", i === 0 && r.list.length > 1 ? "best" : "");
+      tr.title = s.xs.map(e => `${thaiDate(e.date)} ${fmt(e.amount)} บาท`).join("\n");
+      const nm = el("td", "sh"); nm.append(el("div", "", (i === 0 && r.list.length > 1 ? "✓ " : "") + s.shop), el("div", "hint", `ซื้อล่าสุด ${thaiDate(s.last.date)} · ${s.xs.length} ครั้ง${s.xs.length > 1 && s.min < s.v ? ` · เคยได้ ${fmtC(s.min)}` : ""}`));
+      const d = best.v > 0 ? (s.v - best.v) / best.v * 100 : 0;
+      const pv = el("td", "n", s.v == null ? "—" : fmtC(s.v)); if (r.unit && s.v != null) pv.append(el("div", "hint", "/" + r.unit));
+      tr.append(nm, pv,
+        el("td", "n" + (d >= 0.5 ? " neg" : ""), r.list.length < 2 ? "—" : i === 0 ? "ถูกสุด" : d < 0.5 ? "=" : `+${d.toFixed(0)}%`));
+      tb.append(tr);
+    });
+  }
+}
+$("cmpSearch").addEventListener("input", () => renderCompare());
+$("cmpOne").addEventListener("change", () => renderCompare());
 
 /* ---------- funds (saving goals) ---------- */
 // A goal counts one or more saving groups. Older goals stored a single "group".
