@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}.cmp-open{width:100%;margin:10px 0 2px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -475,6 +475,17 @@ details summary{cursor:pointer;font-weight:500}
   <!-- SHOP (Muan) -->
   <section class="page" id="page-shop" hidden>
     <div class="chips" id="shopChips"></div>
+    <button class="btn primary cmp-open" type="button" id="cmpOpen" aria-expanded="false" aria-controls="cmpPanel">⚖ เทียบราคาระหว่างร้าน</button>
+    <div class="panel srch" id="cmpPanel" hidden>
+      <div class="panel-head"><h2>เทียบราคาระหว่างร้าน</h2><button class="btn sm" type="button" id="cmpClose">ปิด</button></div>
+      <div class="hint">ของชิ้นเดียวกันที่เคยซื้อจากหลายร้าน ราคาที่จ่ายจริงครั้งล่าสุดของแต่ละร้าน (ไม่จำกัดเดือน) ถ้าขนาดบรรจุต่างกันจะเทียบต่อลิตร / กก.</div>
+      <input type="search" id="cmpSearch" placeholder="🔍 ค้นหาสินค้า หรือร้าน" aria-label="ค้นหาสินค้าที่จะเทียบราคา" autocomplete="off" style="margin:8px 0">
+      <label class="hint cmp-one"><input type="checkbox" id="cmpOne"> แสดงของที่ซื้อร้านเดียวด้วย</label>
+      <div class="scroll"><table class="cost cmp">
+        <thead><tr><th>ร้าน</th><th class="n">ราคาล่าสุด</th><th class="n">เทียบ</th></tr></thead>
+        <tbody id="mCmp"></tbody>
+      </table></div>
+    </div>
     <div class="tiles t3">
       <div class="tile inc"><span class="k">รายรับร้าน</span><span class="v num" id="mInc">0</span></div>
       <div class="tile exp"><span class="k">ค่าใช้จ่ายร้าน</span><span class="v num" id="mExp">0</span></div>
@@ -498,16 +509,6 @@ details summary{cursor:pointer;font-weight:500}
       <div class="scroll"><table class="cost">
         <thead><tr><th>วัตถุดิบ</th><th class="n">ล่าสุด</th><th class="n">เฉลี่ย</th><th class="n">แนวโน้ม</th></tr></thead>
         <tbody id="mCost"></tbody>
-      </table></div>
-    </div>
-    <div class="panel srch">
-      <h2>เทียบราคาระหว่างร้าน</h2>
-      <div class="hint">ของชิ้นเดียวกันที่เคยซื้อจากหลายร้าน ราคาที่จ่ายจริงครั้งล่าสุดของแต่ละร้าน (ไม่จำกัดเดือน) ถ้าขนาดบรรจุต่างกันจะเทียบต่อลิตร / กก.</div>
-      <input type="search" id="cmpSearch" placeholder="🔍 ค้นหาสินค้า หรือร้าน" aria-label="ค้นหาสินค้าที่จะเทียบราคา" autocomplete="off" style="margin:8px 0">
-      <label class="hint cmp-one"><input type="checkbox" id="cmpOne"> แสดงของที่ซื้อร้านเดียวด้วย</label>
-      <div class="scroll"><table class="cost cmp">
-        <thead><tr><th>ร้าน</th><th class="n">ราคาล่าสุด</th><th class="n">เทียบ</th></tr></thead>
-        <tbody id="mCmp"></tbody>
       </table></div>
     </div>
     <div class="panel"><h2>รายการของร้าน</h2><div class="list" id="mList"></div></div>
@@ -2168,6 +2169,14 @@ function renderCompare(all, itemKey){
 }
 $("cmpSearch").addEventListener("input", () => renderCompare());
 $("cmpOne").addEventListener("change", () => renderCompare());
+// opened from the button at the top of the Muan page; stays open on this device until closed
+function showCompare(on){
+  $("cmpPanel").hidden = !on; $("cmpOpen").hidden = on; $("cmpOpen").setAttribute("aria-expanded", String(on));
+  try { localStorage.setItem("money-book-cmp", on ? "1" : ""); } catch {}
+}
+$("cmpOpen").addEventListener("click", () => showCompare(true));
+$("cmpClose").addEventListener("click", () => showCompare(false));
+try { if (localStorage.getItem("money-book-cmp")) showCompare(true); } catch {}
 
 /* ---------- funds (saving goals) ---------- */
 // A goal counts one or more saving groups. Older goals stored a single "group".
