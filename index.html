@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}.cmp-open{width:100%;margin:10px 0 2px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -475,9 +475,8 @@ details summary{cursor:pointer;font-weight:500}
   <!-- SHOP (Muan) -->
   <section class="page" id="page-shop" hidden>
     <div class="chips" id="shopChips"></div>
-    <button class="btn primary cmp-open" type="button" id="cmpOpen" aria-expanded="false" aria-controls="cmpPanel">⚖ เทียบราคาระหว่างร้าน</button>
     <div class="panel srch" id="cmpPanel" hidden>
-      <div class="panel-head"><h2>เทียบราคาระหว่างร้าน</h2><button class="btn sm" type="button" id="cmpClose">ปิด</button></div>
+      <h2>เทียบราคาระหว่างร้าน</h2>
       <div class="hint">ของชิ้นเดียวกันที่เคยซื้อจากหลายร้าน ราคาที่จ่ายจริงครั้งล่าสุดของแต่ละร้าน (ไม่จำกัดเดือน) ถ้าขนาดบรรจุต่างกันจะเทียบต่อลิตร / กก.</div>
       <input type="search" id="cmpSearch" placeholder="🔍 ค้นหาสินค้า หรือร้าน" aria-label="ค้นหาสินค้าที่จะเทียบราคา" autocomplete="off" style="margin:8px 0">
       <label class="hint cmp-one"><input type="checkbox" id="cmpOne"> แสดงของที่ซื้อร้านเดียวด้วย</label>
@@ -839,6 +838,7 @@ let page = "overall";
 let mode = "month";
 let curYM = todayISO.slice(0,7);
 let shopBiz = "Muan";
+const CMP = "\u0000cmp";
 const listFilter = {income: "", expense: ""};
 const listLimit = {};
 
@@ -2032,10 +2032,14 @@ function savingLedger(box, rows){
 function shopList(){ return bizList().filter(b => b !== PERSONAL); }
 function renderShop(P){
   const shops = shopList();
-  if (!shops.includes(shopBiz)) shopBiz = shops[0];
+  if (!shops.includes(shopBiz) && shopBiz !== CMP) shopBiz = shops[0];
   const box = $("shopChips"); box.textContent = "";
-  shops.forEach(b => { const c = el("button", "chip", bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
+  [...shops, CMP].forEach(b => { const c = el("button", "chip", b === CMP ? "⚖ เทียบราคา" : bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
   document.querySelector('#tabs [data-page="shop"]').textContent = "Muan";
+  // the เทียบราคา chip swaps the page for the price comparison, over every shop's purchases
+  const cmp = shopBiz === CMP;
+  for (const x of $("page-shop").children) if (x !== box) x.hidden = cmp !== (x.id === "cmpPanel");
+  if (cmp){ renderCompare(entries.filter(e => bizOf(e) !== PERSONAL && e.kind === "expense"), e => (e.note || e.name || "").trim()); return; }
   const L = P.filter(e => bizOf(e) === shopBiz), all = entries.filter(e => bizOf(e) === shopBiz && e.kind === "expense");
   const s = sums(L);
   setNum("mInc", s.inc); setNum("mExp", s.exp); setNum("mNet", s.inc - s.exp, true);
@@ -2169,14 +2173,7 @@ function renderCompare(all, itemKey){
 }
 $("cmpSearch").addEventListener("input", () => renderCompare());
 $("cmpOne").addEventListener("change", () => renderCompare());
-// opened from the button at the top of the Muan page; stays open on this device until closed
-function showCompare(on){
-  $("cmpPanel").hidden = !on; $("cmpOpen").hidden = on; $("cmpOpen").setAttribute("aria-expanded", String(on));
-  try { localStorage.setItem("money-book-cmp", on ? "1" : ""); } catch {}
-}
-$("cmpOpen").addEventListener("click", () => showCompare(true));
-$("cmpClose").addEventListener("click", () => showCompare(false));
-try { if (localStorage.getItem("money-book-cmp")) showCompare(true); } catch {}
+
 
 /* ---------- funds (saving goals) ---------- */
 // A goal counts one or more saving groups. Older goals stored a single "group".
@@ -3086,7 +3083,7 @@ function openForm(e){
     fillAcc(e.account || "");
     if (isTct(e)){ $("fAmount").value = tctFull(e); itemGross = r2(tctFull(e) + (e.itemDisc || 0)); showTct(); }
   } else {
-    if (page === "shop") { setPick(pk.biz, shopBiz); fillNames(""); fillNotes(""); }
+    if (page === "shop") { setPick(pk.biz, shopBiz === CMP ? shopList()[0] : shopBiz); fillNames(""); fillNotes(""); }
     // a day picked on the calendar is the day the new entry goes on
     $("fDate").value = dayPick || (mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO);
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
