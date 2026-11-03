@@ -3066,30 +3066,40 @@ function applyNoteCat(){
   if (!c || pickVal(pk.name) === c) return;
   setPick(pk.name, c); fillNotes(n);
 }
-onPick(pk.note, () => {
-  applyNoteCat();
-  // Same item as before: start from the last unit, shop and price paid.
+// Same item as before: start from what was bought last time at that shop
+// (amount, unit, price per unit and size per unit). Everything stays editable.
+let autoQty = false;
+$("fQty").addEventListener("input", () => { autoQty = false; });
+function fillFromLast(fromShop){
   const n = pickVal(pk.note);
-  shopPriceHint();
   if (kind !== "expense" || !n) return;
-  // each shop has its own price: with a shop picked, start from what was paid there
   const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n && (!editing || e.id !== editing.id)).sort((a,b) => a.date < b.date ? 1 : -1);
-  // the unit and the size per unit come back every time, from the last entry that had them;
+  const atShop = shop ? all.filter(e => e.shop === shop) : [];
   // editing an entry only fills what is still empty, so nothing typed there is replaced
   if (!editing){
-    const last = (shop && all.find(e => e.shop === shop)) || (shop ? null : all[0]);
-    if (last && last.unitPrice > 0){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; }
-    const ref = last || all[0];
-    if (!shop && ref && ref.shop) setPick(pk.shop, ref.shop);
+    const last = shop ? atShop.find(e => e.unitPrice > 0) : all[0];
+    if (last && last.unitPrice > 0){
+      $("fUnit").value = last.unitPrice;
+      if (!$("fQty").value || autoQty){ $("fQty").value = Number(last.qty) > 0 ? last.qty : 1; autoQty = true; }
+    }
+    if (!shop && !fromShop && last && last.shop) setPick(pk.shop, last.shop);
   }
-  const u = ((shop && all.find(e => e.shop === shop && e.unit)) || all.find(e => e.unit) || {}).unit;
+  const shop2 = pickVal(pk.shop), atShop2 = shop2 ? all.filter(e => e.shop === shop2) : [];
+  // the unit and the size per unit come from the last entry at this shop that had them, else any entry
+  const u = (atShop2.find(e => e.unit) || all.find(e => e.unit) || {}).unit;
   if (u && !(editing && pickVal(pk.unit))) setPick(pk.unit, u);
-  shopPriceHint();
-  // the size last remembered for this item, else the newest entry that had one
-  const sz = all.find(e => e.size > 0);
-  const zz = sizeRaw({note: n}) || (sz ? {size: sz.size, unit: sz.sizeUnit || "ml"} : null);
+  const zOf = e => e ? {size: e.size, unit: e.sizeUnit || "ml"} : null;
+  // a size from another shop only counts when it was bought by the same unit (a กระสอบ is not a แก้ว)
+  const cu = pickVal(pk.unit), sameU = e => !cu || !e.unit || e.unit === cu;
+  const zz = zOf(atShop2.find(e => e.size > 0)) || zOf(all.find(e => e.size > 0 && sameU(e))) || (all.every(sameU) ? sizeRaw({note: n}) : null);
   if (zz && (!editing || !$("fSize").value)){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
+  else if (!zz && !editing) $("fSize").value = "";
   updateAmount(); showSize();
+}
+onPick(pk.note, () => {
+  applyNoteCat();
+  fillFromLast(false);
+  shopPriceHint();
 });
 // the last price paid for this item at each shop, under the item
 function shopPriceHint(){
@@ -3105,12 +3115,9 @@ function shopPriceHint(){
   h.hidden = false;
 }
 onPick(pk.unit); onPick(pk.shop, () => {
+  // a different shop: its own last amount, unit, price and size for this item
+  fillFromLast(true);
   shopPriceHint();
-  // a different shop: its own last price for this item
-  const n = pickVal(pk.note), shop = pickVal(pk.shop);
-  if (kind !== "expense" || !n || !shop || editing) return;
-  const last = entries.filter(e => e.kind === "expense" && e.note === n && e.shop === shop && e.unitPrice > 0).sort((a,b) => a.date < b.date ? 1 : -1)[0];
-  if (last){ $("fUnit").value = last.unitPrice; if (!$("fQty").value) $("fQty").value = 1; updateAmount(); showSize(); }
 }); onPick(pk.group); onPick(pk.acc); onPick(pk.payer);
 $("fPay").addEventListener("change", () => fillAcc(""));
 // fAmount is always what is paid for this item; the item discount comes off the full price.
@@ -3183,7 +3190,7 @@ function openForm(e){
   $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && (e.instId || e.billId));
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
-  $("entryForm").reset(); $("shopPriceHint").hidden = true;
+  $("entryForm").reset(); $("shopPriceHint").hidden = true; autoQty = false;
   itemGross = 0; $("itemDiscHint").hidden = true; $("sizeHint").hidden = true;
   setKind(k, true);
   if (e){
