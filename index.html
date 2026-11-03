@@ -795,10 +795,29 @@ function sizeOf(e){
   // counted in the same unit as the amount bought (10 ฟอง × 4.70 with a size of 10 ฟอง): the size says nothing new
   return z && e.unit && z.unit === e.unit ? null : z;
 }
+// sizes are per shop: the same item from another shop can come in another pack (a bag of ice is not a sack)
+const SHOP_SEP = "\t";
+let sizedShopsCache = null, sizedShopsKey = null;
+// item → shops where an entry has a size typed on it
+function sizedShops(){
+  if (sizedShopsKey === entries && sizedShopsCache && sizedShopsCache.n === entries.length) return sizedShopsCache.m;
+  const m = new Map();
+  for (const e of entries) if (e.kind === "expense" && Number(e.size) > 0 && e.shop){ const k = (e.note || "").trim(); if (!m.has(k)) m.set(k, new Set()); m.get(k).add(e.shop); }
+  sizedShopsKey = entries; sizedShopsCache = {m, n: entries.length};
+  return m;
+}
 function sizeRaw(e){
   if (Number(e.size) > 0) return {size: Number(e.size), unit: e.sizeUnit || "ml"};
-  const k = (e.note || "").trim(), m = k && (settings.itemSizes || {})[k];
-  return m && m.size > 0 ? {size: m.size, unit: m.unit || "ml"} : null;
+  const k = (e.note || "").trim(), all = settings.itemSizes || {};
+  if (!k) return null;
+  const at = e.shop && all[e.shop + SHOP_SEP + k];
+  if (at && at.size > 0) return {size: at.size, unit: at.unit || "ml"};
+  const m = all[k];
+  if (!(m && m.size > 0)) return null;
+  // remembered from another shop: not this one's size
+  if (e.shop && m.shop && m.shop !== e.shop) return null;
+  if (e.shop && !m.shop){ const ss = sizedShops().get(k); if (ss && ss.size && !ss.has(e.shop)) return null; }
+  return {size: m.size, unit: m.unit || "ml"};
 }
 // Sizes typed on an entry are also remembered per item in the synced settings,
 // so they count even when the sheet keeps no size column (old script or rows typed in the sheet).
@@ -807,8 +826,10 @@ function rememberSizes(list){
   for (const e of list){
     const k = (e.note || "").trim(), z = Number(e.size);
     if (!k || !(z > 0)) continue;
-    const u = e.sizeUnit || "ml";
-    if (!m[k] || m[k].size !== z || m[k].unit !== u){ m[k] = {size: z, unit: u, t: Date.now()}; changed = true; }
+    const u = e.sizeUnit || "ml", sh = e.shop || "";
+    if (!m[k] || m[k].size !== z || m[k].unit !== u || (m[k].shop || "") !== sh){ m[k] = {size: z, unit: u, t: Date.now(), ...(sh ? {shop: sh} : {})}; changed = true; }
+    const ks = sh && sh + SHOP_SEP + k;
+    if (ks && (!m[ks] || m[ks].size !== z || m[ks].unit !== u)){ m[ks] = {size: z, unit: u, t: Date.now()}; changed = true; }
   }
   if (changed) store.setSetting("itemSizes", m);
 }
@@ -3083,7 +3104,7 @@ function fillFromLast(fromShop){
     if (last){
       $("fUnit").value = priceOf(last);
       if (!$("fQty").value || autoQty){ $("fQty").value = Number(last.qty) > 0 ? last.qty : 1; autoQty = true; }
-    }
+    } else if (autoQty){ $("fUnit").value = ""; $("fQty").value = ""; $("fAmount").value = ""; autoQty = false; } // filled from another shop: clear it
     if (!shop && !fromShop && last && last.shop) setPick(pk.shop, last.shop);
   } else if (!$("fUnit").value && !$("fQty").value){
     // editing an old entry (sheet rows have only the total): split its own total by the last price,
@@ -3094,14 +3115,13 @@ function fillFromLast(fromShop){
       $("fQty").value = whole ? Math.round(q) : 1; $("fUnit").value = whole ? p : r2(amt);
     }
   }
-  const shop2 = pickVal(pk.shop), atShop2 = shop2 ? all.filter(e => e.shop === shop2) : [];
-  // the unit and the size per unit come from the last entry at this shop that had them, else any entry
-  const u = (atShop2.find(e => e.unit) || all.find(e => e.unit) || {}).unit;
+  // with a shop picked, only that shop's own purchases count: another shop's unit or size is never borrowed
+  const shop2 = pickVal(pk.shop), from = shop2 ? all.filter(e => e.shop === shop2) : all;
+  const u = (from.find(e => e.unit) || {}).unit;
   if (u && !(editing && pickVal(pk.unit))) setPick(pk.unit, u);
+  else if (!u && !editing && shop2) setPick(pk.unit, "");
   const zOf = e => e ? {size: e.size, unit: e.sizeUnit || "ml"} : null;
-  // a size from another shop only counts when it was bought by the same unit (a กระสอบ is not a แก้ว)
-  const cu = pickVal(pk.unit), sameU = e => !cu || !e.unit || e.unit === cu;
-  const zz = zOf(atShop2.find(e => e.size > 0)) || zOf(all.find(e => e.size > 0 && sameU(e))) || (all.every(sameU) ? sizeRaw({note: n}) : null);
+  const zz = zOf(from.find(e => e.size > 0)) || sizeRaw({note: n, shop: shop2 || undefined});
   if (zz && (!editing || !$("fSize").value)){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   else if (!zz && !editing) $("fSize").value = "";
   updateAmount(); showSize();
