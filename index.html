@@ -561,7 +561,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="syncKey">รหัสลับ</label><input id="syncKey" type="password" autocomplete="off"></div>
       <div class="actions"><button class="btn primary" type="button" id="syncOn">เชื่อมต่อ</button><button class="btn" type="button" id="syncNow" hidden>ซิงก์ตอนนี้</button><button class="btn" type="button" id="syncOff" hidden>เลิกเชื่อมต่อ</button></div>
       <button class="btn" type="button" id="syncPush" hidden>ส่งข้อมูลในเครื่องนี้ขึ้นชีต (แทนที่แท็บข้อมูลแอป)</button>
-      <div class="toast" id="syncMsg" role="status"></div><div id="syncQ"></div>
+      <div class="toast" id="syncMsg" role="status"></div><div id="syncQ"></div><div class="hint" id="storeUse"></div>
     </div>
     <div class="panel">
       <h2>บัญชีของฉัน</h2>
@@ -3853,9 +3853,32 @@ function initStore(){
   const KEY = "money-book-entries", CFG = "money-book-sync", Q = "money-book-queue", SET = "money-book-settings";
   const ls = {
     get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
-    set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+    // a full browser store must never fail quietly: what was not kept would be gone on the next open
+    set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (err){ storeFull(k, err); return false; } },
     del(k){ try { localStorage.removeItem(k); } catch {} }
   };
+  let fullWarned = 0, isFull = "";
+  function storeFull(k, err){
+    if (!/quota|full|exceed/i.test(String(err && (err.name + err.message)))) return;
+    const m = isFull = "⚠ พื้นที่เก็บข้อมูลของเบราว์เซอร์เครื่องนี้เต็ม รอให้ขึ้นว่าซิงก์แล้วก่อนค่อยปิดหรือรีเฟรชแอป แล้วแจ้งในแชต";
+    try { $("storeNote").textContent = m; $("syncMsg").textContent = m; $("syncMsg").style.color = "var(--exp)"; } catch {}
+    if (Date.now() - fullWarned > 60000){ fullWarned = Date.now(); try { toast(m, true); } catch {} }
+  }
+  // Item photos ("img:<name>") are big: they live in IndexedDB (far more room than localStorage), never in the
+  // settings copy or the send queue in localStorage; the queue only names the photo and the value is read when sending.
+  const isPic = k => typeof k === "string" && k.startsWith("img:");
+  const noPics = o => { const r = {}; for (const k in o) if (!isPic(k)) r[k] = o[k]; return r; };
+  const idb = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((ok, bad) => { const r = indexedDB.open("money-book", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); }));
+    const tx = (mode, f) => open().then(db => new Promise((ok, bad) => { const t = db.transaction("kv", mode), st = t.objectStore("kv"), out = f(st); t.oncomplete = () => ok(out && out.result); t.onerror = () => bad(t.error); }));
+    return {
+      put: (k, v) => tx("readwrite", st => st.put(v, k)),
+      all: () => open().then(db => new Promise((ok, bad) => { const o = {}, t = db.transaction("kv"), c = t.objectStore("kv").openCursor(); c.onsuccess = () => { const x = c.result; if (x){ o[x.key] = x.value; x.continue(); } else ok(o); }; c.onerror = () => bad(c.error); }))
+    };
+  })();
+  let picsInIdb = true;
+  const savePic = (k, v) => { if (picsInIdb) idb.put(k, v ?? null).catch(() => { picsInIdb = false; ls.set(SET, settings); }); };
   const subs = [];
   // Text the sheet once turned into a date shows up as "Sat Nov 07 2026 00:00:00 GMT+0700 (…)"; show it short instead (7-11).
   const JSDATE = /^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{2} \d{4} \d{2}:\d{2}:\d{2} GMT/;
@@ -3867,8 +3890,13 @@ function initStore(){
   const needsFix = e => ["note", "name"].some(k => typeof e[k] === "string" && fixWords(e[k]) !== e[k]);
   const clean0 = clean;
   const cleanAll = e => { clean0(e); for (const k of ["note", "name"]) if (typeof e[k] === "string") e[k] = fixWords(e[k]); return e; };
-  const read = () => ls.get(KEY, []).map(cleanAll);
-  const write = list => { list = list.map(cleanAll); ls.set(KEY, list); subs.forEach(f => f(list)); };
+  // when the browser store is full, the entries and the send queue are kept in memory, so nothing typed is lost
+  // before it reaches the sheet (the sheet then has it, and the next open loads it from there)
+  let memE = null, memQ = null;
+  const qGet = () => memQ || ls.get(Q, []);
+  function qSet(q){ memQ = ls.set(Q, q) ? null : q; }
+  const read = () => (memE || ls.get(KEY, [])).map(cleanAll);
+  const write = list => { list = list.map(cleanAll); memE = ls.set(KEY, list) ? null : list; subs.forEach(f => f(list)); };
   // Budget plans and saving goals: kept per device and in the sheet's "ตั้งค่าแอป" tab.
   settings = ls.get(SET, null) || {funds: [{id: "fjp", name: "ออมเงินไปญี่ปุ่นกับที่รัก", group: "ออมไปญี่ปุ่น", target: 0, due: ""}]};
   // The starter Japan goal also counts the other Japan groups used in past years, e.g. "ออมไปญี่ปุ่น (ME)".
@@ -3887,12 +3915,27 @@ function initStore(){
   const mergeSizes = (...maps) => { const o = {}; for (const m of maps) for (const [k, v] of Object.entries(m || {})) if (v && v.size > 0 && (!o[k] || (v.t || 0) >= (o[k].t || 0))) o[k] = v; return o; };
   const writeSettings = (s, local) => {
     if (s.itemSizes) ls.set(SIZES, mergeSizes(ls.get(SIZES, {}), s.itemSizes));
-    settings = s; ls.set(SET, s); if (!local) render();
+    // photos that are new or changed since the copy in memory go to IndexedDB
+    for (const k in s) if (isPic(k) && JSON.stringify(s[k] && s[k].t) + !!(s[k] && s[k].d) !== JSON.stringify(settings[k] && settings[k].t) + !!(settings[k] && settings[k].d)) savePic(k, s[k]);
+    settings = s; ls.set(SET, picsInIdb ? noPics(s) : s); if (!local) render();
   };
+  // photos saved before they moved to IndexedDB: move them there now, and free their room in localStorage
+  const picsReady = (async () => {
+    try {
+      const old = Object.keys(settings).filter(isPic);
+      for (const k of old) await idb.put(k, settings[k] ?? null);
+      const q = qGet();
+      if (q.some(o => o.op === "setting" && isPic(o.key) && "value" in o)) qSet(q.map(o => o.op === "setting" && isPic(o.key) ? {op: o.op, key: o.key, pic: true, seq: o.seq} : o));
+      const m = await idb.all();
+      for (const [k, v] of Object.entries(m)) if (isPic(k) && !(k in settings)) settings[k] = v;
+      ls.set(SET, noPics(settings));
+    } catch { picsInIdb = false; }
+    try { render(); } catch {}
+  })();
   { const b = ls.get(SIZES, null); if (b) settings.itemSizes = mergeSizes(b, settings.itemSizes); }
   // Settings this device changed but the sheet has not stored yet win over the sheet's copy,
   // and so do settings changed while a read from the sheet was on its way (its copy is older).
-  const pendingSettings = () => ls.get(Q, []).filter(o => o.op === "setting").map(o => o.key);
+  const pendingSettings = () => qGet().filter(o => o.op === "setting").map(o => o.key);
   const wrote = {};
   // when this device last added, changed or deleted each entry
   const touched = {}, touch = ids => { const t = Date.now(); ids.forEach(id => { touched[id] = t; }); };
@@ -3917,6 +3960,7 @@ function initStore(){
 
   const fmtTime = () => new Date().toLocaleTimeString("th-TH", {hour:"2-digit", minute:"2-digit"});
   function status(msg, bad){
+    if (isFull){ msg = isFull + " · " + msg; bad = true; }
     $("storeNote").textContent = msg;
     $("syncMsg").textContent = msg; $("syncMsg").style.color = bad ? "var(--exp)" : "var(--muted)";
     showQueue();
@@ -3924,6 +3968,10 @@ function initStore(){
   // ตั้งค่า: what is still waiting to go up, why it failed, and a way to let one go
   function showQueue(){
     const box = $("syncQ"); if (!box || !store) return;
+    // how full this browser's store is, and how many item photos the app holds
+    try { let n = 0; for (let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); n += k.length + (localStorage.getItem(k) || "").length; }
+      const pics = Object.keys(settings).filter(k => isPic(k) && settings[k] && settings[k].d).length;
+      $("storeUse").textContent = `พื้นที่ในเบราว์เซอร์ใช้ไป ${Math.min(100, Math.round(n / 52000))}% · รูปสินค้า ${pics} รูป${picsInIdb ? "" : " (เก็บแบบเดิม)"}`; } catch {}
     const P = store.pending(); box.textContent = "";
     if (!P.length) return;
     const d = document.createElement("details"); d.className = "syncq";
@@ -3947,7 +3995,7 @@ function initStore(){
     box.append(d);
   }
   function idle(){
-    const n = ls.get(Q, []).length;
+    const n = qGet().length;
     if (!cfg) status("ข้อมูลเก็บไว้ในเบราว์เซอร์เครื่องนี้ เชื่อม Google Sheet เพื่อซิงก์ระหว่างมือถือกับคอม");
     else status(n ? `ยังไม่ได้ส่งขึ้น Google Sheet ${n} รายการ จะลองใหม่อัตโนมัติ` : `ซิงก์กับ Google Sheet แล้ว ${fmtTime()}`, !!n);
   }
@@ -3982,14 +4030,14 @@ function initStore(){
   const own = list => list.filter(e => e.src !== "sheet");
   function enqueue(...ops){
     if (!cfg) return;
-    let q = ls.get(Q, []);
+    let q = qGet();
     for (const op of ops){
       if (op.op === "replaceAll") q = [];
       // only the newest value of a setting needs sending
       if (op.op === "setting") q = q.filter(o => !(o.op === "setting" && o.key === op.key));
-      q.push({...op, seq: ++seq});
+      q.push(op.op === "setting" && isPic(op.key) && picsInIdb ? {op: "setting", key: op.key, pic: true, seq: ++seq} : {...op, seq: ++seq});
     }
-    ls.set(Q, q);
+    qSet(q);
     flush();
   }
   const keyOf = e => [e.kind, e.date, Math.round((Number(e.amount)||0)*100), String(e.name||"").trim(), String(e.note||"").trim()].join("|");
@@ -3997,24 +4045,28 @@ function initStore(){
   // price × count only restating the amount (1 × the total) is the same as leaving them empty
   const pq = e => { const u = Number(e.unitPrice) || 0, n = Number(e.qty) || 0; return (n === 1 || !n) && (!u || u === Number(e.amount)) ? "" : `${u}|${n}`; };
   const rowSays = (r, e) => same(r.date, e.date) && Number(r.amount) === Number(e.amount) && same(r.name, e.name) && same(r.note, e.note) && pq(r) === pq(e);
+  // a photo named in the queue is sent with its value as it is now
+  const wire = ({seq, pic, ...op}) => pic ? {...op, value: settings[op.key] ?? null} : op;
   async function flush(){
     if (!cfg || busy) return;
+    await picsReady;
+    if (busy) return;
     // drop sheet-row edits that change none of the sheet's own columns (only app-kept details changed)
     const noop = o => o.op === "sheetEdit" && o.kind !== "saving" && o.entry && o.orig && same(o.entry.date, o.orig.date) && Number(o.entry.amount) === Number(o.orig.amount)
       && same(o.entry.name, o.orig.name) && same(o.entry.note, o.orig.note) && pq(o.entry) === pq(o.orig);
-    if (ls.get(Q, []).some(noop)) ls.set(Q, ls.get(Q, []).filter(o => !noop(o)));
+    if (qGet().some(noop)) qSet(qGet().filter(o => !noop(o)));
     // a setting queued several times: keep only its newest value
-    { const q0 = ls.get(Q, []), last = {}; q0.forEach(o => { if (o.op === "setting") last[o.key] = o.seq; });
-      const q1 = q0.filter(o => o.op !== "setting" || last[o.key] === o.seq); if (q1.length < q0.length) ls.set(Q, q1); }
-    const q = ls.get(Q, []);
+    { const q0 = qGet(), last = {}; q0.forEach(o => { if (o.op === "setting") last[o.key] = o.seq; });
+      const q1 = q0.filter(o => o.op !== "setting" || last[o.key] === o.seq); if (q1.length < q0.length) qSet(q1); }
+    const q = qGet();
     if (!q.length){ idle(); return; }
     busy = true;
     status("กำลังส่งขึ้น Google Sheet…");
     let ok = false, clean = false;
     try {
-      const j = await call({ops: q.map(({seq, ...op}) => op)});
+      const j = await call({ops: q.map(wire)});
       const sent = new Set(q.map(o => o.seq));
-      ls.set(Q, ls.get(Q, []).filter(o => !sent.has(o.seq)));
+      qSet(qGet().filter(o => !sent.has(o.seq)));
       ok = true; clean = true;
       if (q.some(o => o.op === "sheetEdit" || o.op === "sheetDel")) setTimeout(() => {
         pull().then(() => { if (j.conflicts){ const m = `แก้ไม่สำเร็จ ${j.conflicts} รายการ เพราะแถวนั้นในชีตถูกแก้หรือย้ายไปก่อนแล้ว แอปจึงแสดงค่าล่าสุดจากชีต ลองแก้อีกครั้ง`; status(m, true); alert(m); } });
@@ -4024,7 +4076,7 @@ function initStore(){
       let bad = [];
       if (q.length > 1 && !/รหัสลับ|ไม่ได้ต่ออินเทอร์เน็ต|เปิดลิงก์/.test(err.message)){
         for (const o of q){
-          try { const {seq, ...op} = o; await call({ops: [op]}); ls.set(Q, ls.get(Q, []).filter(x => x.seq !== o.seq)); }
+          try { await call({ops: [wire(o)]}); qSet(qGet().filter(x => x.seq !== o.seq)); }
           catch (e2){ bad.push([o, e2.message]); }
         }
         if (bad.length < q.length){ ok = true; setTimeout(() => pull(), 0); }
@@ -4049,7 +4101,7 @@ function initStore(){
           const done = bad.filter(([x]) => x.op === "sheetEdit" && x.entry && rowOf(x) && rowSays(rowOf(x), x.entry));
           if (done.length){
             const gone = new Set(done.map(([x]) => x.seq));
-            ls.set(Q, ls.get(Q, []).filter(o => !gone.has(o.seq)));
+            qSet(qGet().filter(o => !gone.has(o.seq)));
             bad = bad.filter(([x]) => !gone.has(x.seq));
             if (!bad.length){ ok = true; clean = true; setTimeout(() => pull(), 0); }
           }
@@ -4060,12 +4112,12 @@ function initStore(){
     }
     finally { busy = false; }
     if (clean) ls.del("money-book-bad");
-    if (ok){ if (!ls.get(Q, []).length) idle(); else if (clean) flush(); }
+    if (ok){ if (!qGet().length) idle(); else if (clean) flush(); }
   }
   async function pull(){
     if (!cfg) return;
     await flush();
-    if (ls.get(Q, []).length || busy) return;
+    if (qGet().length || busy) return;
     const since = Date.now();
     try {
       const j = await call({ops: [], list: true}); ls.set("money-book-script", j.version || 0); mergeSettings(j.settings, since);
@@ -4113,8 +4165,8 @@ function initStore(){
     async sheetEdit(orig, upd){ sheetOp(orig, {op: "sheetEdit", entry: upd}); touch([orig.id]); logOps("edit", [upd]); const l = read(); const i = l.findIndex(x => x.id === orig.id); if (i >= 0) l[i] = upd; write(l); },
     async sheetDel(orig){ sheetOp(orig, {op: "sheetDel"}); touch([orig.id]); logOps("del", [orig]); write(read().filter(x => x.id !== orig.id)); },
     // what is still waiting to go to the sheet, with why it failed last time
-    pending(){ const B = new Map(ls.get("money-book-bad", []).map(b => [b.seq, b])); return ls.get(Q, []).map(o => ({seq: o.seq, name: opName(o), op: o, why: (B.get(o.seq) || {}).why || "", now: (B.get(o.seq) || {}).now})); },
-    dropPending(seqNo){ ls.set(Q, ls.get(Q, []).filter(o => o.seq !== seqNo)); ls.set("money-book-bad", ls.get("money-book-bad", []).filter(b => b.seq !== seqNo)); if (!ls.get(Q, []).length){ ls.del("money-book-bad"); pull(); } else flush(); },
+    pending(){ const B = new Map(ls.get("money-book-bad", []).map(b => [b.seq, b])); return qGet().map(o => ({seq: o.seq, name: opName(o), op: o, why: (B.get(o.seq) || {}).why || "", now: (B.get(o.seq) || {}).now})); },
+    dropPending(seqNo){ qSet(qGet().filter(o => o.seq !== seqNo)); ls.set("money-book-bad", ls.get("money-book-bad", []).filter(b => b.seq !== seqNo)); if (!qGet().length){ ls.del("money-book-bad"); pull(); } else flush(); },
     retry(){ flush(); },
     replaceAll(list){ write(list); enqueue({op:"replaceAll", entries:own(list)}); },
     newId(){ return "e" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -4133,7 +4185,7 @@ function initStore(){
     try {
       const j = await call({ops: [], list: true}, c);
       cfg = c; ls.set(CFG, cfg); ls.set("money-book-script", j.version || 0);
-      ls.set(Q, []);
+      qSet([]);
       mergeSettings(j.settings || {});
       // Keep what is only on this device: send entries the sheet does not have yet.
       const left = {};
