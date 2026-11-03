@@ -808,15 +808,23 @@ function sizeOf(e){
 }
 // sizes are per shop: the same item from another shop can come in another pack (a bag of ice is not a sack)
 const SHOP_SEP = "\t";
-let sizedShopsCache = null, sizedShopsKey = null;
-// item → shops where an entry has a size typed on it
-function sizedShops(){
-  if (sizedShopsKey === entries && sizedShopsCache && sizedShopsCache.n === entries.length) return sizedShopsCache.m;
-  const m = new Map();
-  for (const e of entries) if (e.kind === "expense" && Number(e.size) > 0 && e.shop){ const k = (e.note || "").trim(); if (!m.has(k)) m.set(k, new Set()); m.get(k).add(e.shop); }
-  sizedShopsKey = entries; sizedShopsCache = {m, n: entries.length};
-  return m;
+let sizeIdxCache = null, sizeIdxKey = null;
+// per item: the units it was bought by where a size was typed (per shop), and the unit each shop sells it by (newest first)
+function sizeIdx(){
+  if (sizeIdxKey === entries && sizeIdxCache && sizeIdxCache.n === entries.length) return sizeIdxCache;
+  const sized = new Map(), shopUnit = new Map();
+  const L = entries.filter(e => e.kind === "expense" && e.note).sort((a, b) => a.date < b.date ? 1 : -1);
+  for (const e of L){
+    const k = e.note.trim();
+    if (e.unit && e.shop){ if (!shopUnit.has(k)) shopUnit.set(k, new Map()); const m = shopUnit.get(k); if (!m.has(e.shop)) m.set(e.shop, e.unit); }
+    if (Number(e.size) > 0 && e.unit){ if (!sized.has(k)) sized.set(k, []); sized.get(k).push({shop: e.shop || "", unit: e.unit}); }
+  }
+  sizeIdxKey = entries; sizeIdxCache = {sized, shopUnit, n: entries.length};
+  return sizeIdxCache;
 }
+// A size typed on the entry, else this shop's own remembered size, else the item's size:
+// a size belongs to the product (Dreamy 1000g is 1000g at any shop), so it carries over to another shop,
+// unless that shop sells the item by another unit (a bag of ice at one shop, a 20 kg sack at another).
 function sizeRaw(e){
   if (Number(e.size) > 0) return {size: Number(e.size), unit: e.sizeUnit || "ml"};
   const k = (e.note || "").trim(), all = settings.itemSizes || {};
@@ -825,9 +833,10 @@ function sizeRaw(e){
   if (at && at.size > 0) return {size: at.size, unit: at.unit || "ml"};
   const m = all[k];
   if (!(m && m.size > 0)) return null;
-  // remembered from another shop: not this one's size
-  if (e.shop && m.shop && m.shop !== e.shop) return null;
-  if (e.shop && !m.shop){ const ss = sizedShops().get(k); if (ss && ss.size && !ss.has(e.shop)) return null; }
+  if (e.shop && m.shop === e.shop) return {size: m.size, unit: m.unit || "ml"};
+  const ix = sizeIdx(), want = e.unit || (e.shop && ix.shopUnit.get(k)?.get(e.shop)) || "";
+  const src = (ix.sized.get(k) || []).filter(x => !m.shop || x.shop === m.shop).map(x => x.unit);
+  if (want && src.length && !src.includes(want)) return null;
   return {size: m.size, unit: m.unit || "ml"};
 }
 // Sizes typed on an entry are also remembered per item in the synced settings,
@@ -3265,13 +3274,17 @@ function fillFromLast(fromShop){
       $("fQty").value = whole ? Math.round(q) : 1; $("fUnit").value = whole ? p : r2(amt);
     }
   }
-  // with a shop picked, only that shop's own purchases count: another shop's unit or size is never borrowed
+  // with a shop picked, its own purchases come first; a shop never bought from yet starts from the item's newest purchase,
+  // except when the shop sells it by another unit
   const shop2 = pickVal(pk.shop), from = shop2 ? all.filter(e => e.shop === shop2) : all;
-  const u = (from.find(e => e.unit) || {}).unit;
+  const u = (from.find(e => e.unit) || (shop2 && !from.length ? all.find(e => e.unit) : null) || {}).unit;
   if (u && !(editing && pickVal(pk.unit))) setPick(pk.unit, u);
   else if (!u && !editing && shop2) setPick(pk.unit, "");
   const zOf = e => e ? {size: e.size, unit: e.sizeUnit || "ml"} : null;
-  const zz = zOf(from.find(e => e.size > 0)) || sizeRaw({note: n, shop: shop2 || undefined});
+  const cu = pickVal(pk.unit);
+  // the size belongs to the product: from this shop, else the item's remembered size, else another shop's sold by the same unit
+  const zz = zOf(from.find(e => e.size > 0)) || sizeRaw({note: n, shop: shop2 || undefined, unit: cu || undefined})
+    || zOf(all.find(e => e.size > 0 && (!cu || !e.unit || e.unit === cu)));
   if (zz && (!editing || !$("fSize").value)){ $("fSize").value = zz.size; $("fSizeUnit").value = zz.unit; }
   else if (!zz && !editing) $("fSize").value = "";
   updateAmount(); showSize();
