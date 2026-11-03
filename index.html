@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px}.itm-pic{flex:none;width:56px;height:56px;border-radius:10px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.68rem;line-height:1.15;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -492,6 +492,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="hint" id="itmCount"></div>
       <div id="itmList"></div>
       <datalist id="itmNames"></datalist>
+      <input type="file" id="itmPicFile" accept="image/*" hidden>
     </div>
     <div class="tiles t3">
       <div class="tile inc"><span class="k">รายรับร้าน</span><span class="v num" id="mInc">0</span></div>
@@ -595,6 +596,13 @@ details summary{cursor:pointer;font-weight:500}
 <button class="fab" type="button" id="fab">＋ เพิ่มรายการ</button>
 <div class="selbar" id="selBar" hidden><span id="selInfo"></span><div class="selbtns"><button class="btn primary sm" type="button" id="selMerge">รวมเป็นบิลเดียว</button><button class="btn sm" type="button" id="selSplit">แยกออกจากบิล</button><button class="btn sm" type="button" id="selCancel">เสร็จ</button></div></div>
 
+<dialog id="picDlg" class="daydlg" aria-labelledby="picTitle">
+  <div class="daybody">
+    <div class="dhead"><h2 id="picTitle">รูป</h2><button class="x" type="button" id="picClose" aria-label="ปิด">×</button></div>
+    <img class="picbig" id="picBig" alt="">
+    <div class="itm-a"><button class="btn sm primary" type="button" id="picChange">📷 เปลี่ยนรูป</button><button class="btn sm" type="button" id="picDel">ลบรูป</button></div>
+  </div>
+</dialog>
 <dialog id="dayDlg" class="daydlg" aria-labelledby="dayTitle">
   <div class="daybody">
     <div class="dhead"><h2 id="dayTitle">วันนี้</h2><button class="x" type="button" id="dayClose" aria-label="ปิด">×</button></div>
@@ -2237,8 +2245,57 @@ async function itmRename(from, to){
   if (sk.includes(from) && !sk.includes(to)) store.setSetting("sizeSkip", [...sk, to]);
   const nc = settings.noteCats;
   if (nc && nc[from] && !nc[to]) store.setSetting("noteCats", {...nc, [to]: nc[from]});
+  const ph = itmPhoto(from);
+  if (ph){ if (!itmPhoto(to)) store.setSetting(itmPicKey(to), ph); store.setSetting(itmPicKey(from), null); }
   await itmPatch(list, {note: to});
   return list.length;
+}
+// one photo per item name, made small on the phone and kept as its own setting ("img:<name>"),
+// so it syncs through the sheet's "ตั้งค่าแอป" tab like other settings and only the changed photo is sent
+const itmPicKey = n => "img:" + n;
+const itmPhoto = n => { const p = settings[itmPicKey(n)]; return p && p.d ? p : null; };
+async function shrinkPhoto(file, max = 320){
+  let src;
+  try { src = await createImageBitmap(file, {imageOrientation: "from-image"}); }
+  catch {
+    src = await new Promise((ok, bad) => { const u = URL.createObjectURL(file), i = new Image(); i.onload = () => { URL.revokeObjectURL(u); ok(i); }; i.onerror = () => { URL.revokeObjectURL(u); bad(new Error("เปิดรูปนี้ไม่ได้ ลองถ่ายใหม่หรือเลือกรูปแบบ JPG/PNG")); }; i.src = u; });
+  }
+  const w0 = src.width, h0 = src.height, k = Math.min(1, max / Math.max(w0, h0));
+  const cv = document.createElement("canvas"); cv.width = Math.max(1, Math.round(w0 * k)); cv.height = Math.max(1, Math.round(h0 * k));
+  const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(src, 0, 0, cv.width, cv.height);
+  if (src.close) src.close();
+  return cv.toDataURL("image/jpeg", 0.72);
+}
+let itmPicFor = null;
+function itmPickPhoto(name){ itmPicFor = name; $("itmPicFile").value = ""; $("itmPicFile").click(); }
+$("itmPicFile").addEventListener("change", async ev => {
+  const f = ev.target.files[0], name = itmPicFor; ev.target.value = "";
+  if (!f || !name) return;
+  toast("กำลังย่อรูป…");
+  try {
+    const d = await shrinkPhoto(f);
+    store.setSetting(itmPicKey(name), {d, t: Date.now()});
+    toast(`ใส่รูป “${name}” แล้ว`);
+    if ($("picDlg").open) openPhoto(name);
+  } catch (err){ toast(err.message || "ใส่รูปไม่สำเร็จ", true); }
+});
+function openPhoto(name){
+  const p = itmPhoto(name); if (!p) return itmPickPhoto(name);
+  itmPicFor = name; $("picTitle").textContent = name; $("picBig").src = p.d; $("picBig").alt = "รูป " + name;
+  if (!$("picDlg").open) $("picDlg").showModal();
+}
+$("picClose").addEventListener("click", () => $("picDlg").close());
+$("picChange").addEventListener("click", () => itmPickPhoto(itmPicFor));
+$("picDel").addEventListener("click", () => {
+  const n = itmPicFor; if (!n || !confirm(`ลบรูปของ “${n}” ใช่ไหม`)) return;
+  store.setSetting(itmPicKey(n), null); $("picDlg").close(); toast(`ลบรูป “${n}” แล้ว`);
+});
+function itmPicBtn(name){
+  const p = itmPhoto(name), b = el("button", "itm-pic" + (p ? " has" : "")); b.type = "button"; b.disabled = itmBusy;
+  if (p){ const i = document.createElement("img"); i.src = p.d; i.alt = "รูป " + name; i.loading = "lazy"; b.append(i); b.setAttribute("aria-label", "ดูรูป " + name); }
+  else { b.textContent = "📷\nใส่รูป"; b.style.whiteSpace = "pre"; b.setAttribute("aria-label", "ใส่รูป " + name); }
+  b.addEventListener("click", () => p ? openPhoto(name) : itmPickPhoto(name));
+  return b;
 }
 function renderItems(){
   const [cat, label, other] = ITM_VIEWS[shopBiz];
@@ -2265,9 +2322,11 @@ function renderItems(){
     const shops = [...new Set(v.xs.map(e => e.shop).filter(Boolean))];
     const z = sizeRaw(v.xs[0]), c = v.xs.map(costPer).find(Boolean);
     const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
-    row.append(h, el("div", "hint", meta));
+    const top = el("div", "itm-top"), info = el("div");
+    top.append(itmPicBtn(v.name), info); row.append(top);
+    info.append(h, el("div", "hint", meta));
     const inOther = v.xs.filter(e => e.name !== cat);
-    if (inOther.length) row.append(el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")})`));
+    if (inOther.length) info.append(el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")})`));
     // names that look like the same thing typed another way
     const n0 = itmNorm(v.name);
     const sim = all.filter(w => w !== v && (() => { const n1 = itmNorm(w.name); return n1 === n0 || (Math.min(n0.length, n1.length) >= 3 && (n1.includes(n0) || n0.includes(n1))); })()).slice(0, 3);
