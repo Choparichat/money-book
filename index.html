@@ -3140,9 +3140,16 @@ onPick(pk.name, () => { if (pickVal(pk.name) === "Muan" && kind !== "saving") se
 // Details that always belong to one category (เม็ดฟู่ is always ค่ายา): picking the detail sets the category.
 const DEF_NOTE_CATS = {"เม็ดฟู่": "ค่ายา"};
 const noteCats = () => settings.noteCats || DEF_NOTE_CATS;
+// the category this item is usually put in, when no rule says where it belongs
+function noteCatGuess(n){
+  const b = curBiz(), rel = entries.filter(e => e.kind === "expense" && (e.note || "").trim() === n && e.name);
+  return freq(rel.filter(e => bizOf(e) === b), e => e.name)[0] || freq(rel, e => e.name)[0] || "";
+}
 function applyNoteCat(){
   if (kind !== "expense") return;
-  const n = pickVal(pk.note), c = n && noteCats()[n];
+  const n = pickVal(pk.note);
+  if (!n) return;
+  const c = noteCats()[n] || noteCatGuess(n);
   if (!c || pickVal(pk.name) === c) return;
   setPick(pk.name, c); fillNotes(n);
 }
