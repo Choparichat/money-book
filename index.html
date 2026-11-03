@@ -2360,7 +2360,10 @@ function renderItems(){
     h.append(el("strong", "", v.name), el("span", "num", fmt(total)));
     const shops = [...new Set(v.xs.map(e => e.shop).filter(Boolean))];
     const z = sizeRaw(v.xs[0]), c = v.xs.map(costPer).find(Boolean);
-    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
+    // what one piece cost the last time (the price per piece typed, else the amount paid ÷ how many)
+    const e0 = v.xs[0], up = Number(e0.unitPrice) > 0 ? Number(e0.unitPrice) : Number(e0.amount) > 0 ? Number(e0.amount) / (Number(e0.qty) > 0 ? Number(e0.qty) : 1) : 0;
+    const each = up > 0 ? `${fmt(up)} บาท/${e0.unit || "ชิ้น"}` : "";
+    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, each, z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
     const top = el("div", "itm-top"), info = el("div");
     top.append(itmPicBtn(v.name), info); row.append(top);
     info.append(h, el("div", "hint", meta));
