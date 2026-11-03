@@ -3120,8 +3120,10 @@ function shopPriceHint(){
   entries.filter(e => e.kind === "expense" && e.note === n && e.shop && Number(e.unitPrice || e.amount) > 0).sort((a, b) => a.date < b.date ? 1 : -1)
     .forEach(e => { if (!by.has(e.shop)) by.set(e.shop, e); });
   if (!by.size) return;
-  const cur = pickVal(pk.shop);
-  h.textContent = "ราคาล่าสุดแต่ละร้าน: " + [...by.values()].map(e => `${e.shop === cur ? "▶ " : ""}${e.shop} ${fmt(Number(e.unitPrice) || Number(e.amount))}${e.unit ? "/" + e.unit : ""} (${thaiDate(e.date).slice(0, 5)})`).join(" · ");
+  // a shop picked: only its own last price; no shop yet: every shop's, to compare
+  const cur = pickVal(pk.shop), one = e => `${fmt(Number(e.unitPrice) || Number(e.amount))}${e.unit ? "/" + e.unit : ""} (${thaiDate(e.date).slice(0, 5)})`;
+  if (cur){ const e = by.get(cur); if (!e) return; h.textContent = `ราคาล่าสุดที่ร้านนี้: ${one(e)}`; }
+  else h.textContent = "ราคาล่าสุดแต่ละร้าน: " + [...by.values()].map(e => `${e.shop} ${one(e)}`).join(" · ");
   h.hidden = false;
 }
 onPick(pk.unit); onPick(pk.shop, () => {
