@@ -3192,7 +3192,7 @@ function setKind(k, fresh){
 document.querySelectorAll("#kindSeg button").forEach(b => b.addEventListener("click", () => setKind(b.dataset.k)));
 // A new owner or category refreshes the lists but keeps the detail already typed.
 onPick(pk.biz, () => { const n = pickVal(pk.note); fillNames(""); fillNotes(n); });
-onPick(pk.name, () => { if (pickVal(pk.name) === "Muan" && kind !== "saving") setPick(pk.biz, "Muan"); fillNotes(pickVal(pk.note)); });
+onPick(pk.name, () => { catByUser = true; if (pickVal(pk.name) === "Muan" && kind !== "saving") setPick(pk.biz, "Muan"); fillNotes(pickVal(pk.note)); });
 // Details that always belong to one category (เม็ดฟู่ is always ค่ายา): picking the detail sets the category.
 const DEF_NOTE_CATS = {"เม็ดฟู่": "ค่ายา"};
 const noteCats = () => settings.noteCats || DEF_NOTE_CATS;
@@ -3201,11 +3201,14 @@ function noteCatGuess(n){
   const b = curBiz(), rel = entries.filter(e => e.kind === "expense" && (e.note || "").trim() === n && e.name);
   return freq(rel.filter(e => bizOf(e) === b), e => e.name)[0] || freq(rel, e => e.name)[0] || "";
 }
-function applyNoteCat(){
-  if (kind !== "expense") return;
+// a category the person picked themselves always wins: neither a rule nor a guess replaces it
+let catByUser = false;
+function applyNoteCat(guess){
+  if (kind !== "expense" || catByUser) return;
   const n = pickVal(pk.note);
   if (!n) return;
-  const c = noteCats()[n] || noteCatGuess(n);
+  // the usual category is only a starting point when picking the item, never applied again on save
+  const c = noteCats()[n] || (guess ? noteCatGuess(n) : "");
   if (!c || pickVal(pk.name) === c) return;
   setPick(pk.name, c); fillNotes(n);
 }
@@ -3249,7 +3252,7 @@ function fillFromLast(fromShop){
   updateAmount(); showSize();
 }
 onPick(pk.note, () => {
-  applyNoteCat();
+  applyNoteCat(true);
   fillFromLast(false);
   shopPriceHint();
 });
@@ -3335,7 +3338,7 @@ function sheetMode(e){
   if (on) $("sheetNote").textContent = `รายการนี้อยู่ในชีต แท็บ ${e.tab || "ปี"} แถว ${e.row || "?"} แก้แล้วแอปจะเขียนกลับไปที่แถวเดิมในชีตให้`;
 }
 function openForm(e){
-  editing = e || null;
+  editing = e || null; catByUser = false;
   $("fTctPaid").value = "";
   $("dlg").showModal();
   $("toast").textContent = ""; $("snapMsg").textContent = ""; $("snapTextWrap").hidden = true;
