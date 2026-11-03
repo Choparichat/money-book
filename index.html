@@ -3075,21 +3075,23 @@ function fillFromLast(fromShop){
   if (kind !== "expense" || !n) return;
   const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n && (!editing || e.id !== editing.id)).sort((a,b) => a.date < b.date ? 1 : -1);
   const atShop = shop ? all.filter(e => e.shop === shop) : [];
+  // the price per unit paid: typed, else the total over the amount bought (rows that kept only a total)
+  const priceOf = e => Number(e.unitPrice) > 0 ? Number(e.unitPrice) : Number(e.amount) > 0 ? Math.round((Number(e.amount) + (Number(e.disc) || 0) + (Number(e.itemDisc) || 0)) / (Number(e.qty) > 0 ? Number(e.qty) : 1) * 100) / 100 : 0;
   // editing an entry only fills what is still empty, so nothing typed there is replaced
   if (!editing){
-    const last = shop ? atShop.find(e => e.unitPrice > 0) : all[0];
-    if (last && last.unitPrice > 0){
-      $("fUnit").value = last.unitPrice;
+    const last = shop ? atShop.find(e => priceOf(e) > 0) : all.find(e => priceOf(e) > 0);
+    if (last){
+      $("fUnit").value = priceOf(last);
       if (!$("fQty").value || autoQty){ $("fQty").value = Number(last.qty) > 0 ? last.qty : 1; autoQty = true; }
     }
     if (!shop && !fromShop && last && last.shop) setPick(pk.shop, last.shop);
   } else if (!$("fUnit").value && !$("fQty").value){
     // editing an old entry (sheet rows have only the total): split its own total by the last price,
     // so the amount already paid never changes
-    const last = (shop ? atShop : all).find(e => e.unitPrice > 0), amt = parseFloat($("fAmount").value) + (editing.disc || 0) + (editing.itemDisc || 0);
+    const last = (shop ? atShop : all).find(e => priceOf(e) > 0), amt = parseFloat($("fAmount").value) + (editing.disc || 0) + (editing.itemDisc || 0);
     if (last && amt > 0){
-      const q = amt / last.unitPrice, whole = Math.abs(q - Math.round(q)) < 1e-6 && Math.round(q) > 0;
-      $("fQty").value = whole ? Math.round(q) : 1; $("fUnit").value = whole ? last.unitPrice : r2(amt);
+      const p = priceOf(last), q = amt / p, whole = Math.abs(q - Math.round(q)) < 1e-6 && Math.round(q) > 0;
+      $("fQty").value = whole ? Math.round(q) : 1; $("fUnit").value = whole ? p : r2(amt);
     }
   }
   const shop2 = pickVal(pk.shop), atShop2 = shop2 ? all.filter(e => e.shop === shop2) : [];
@@ -3224,6 +3226,9 @@ function openForm(e){
   $("plRow").hidden = kind !== "expense";
   { const t = e && plTagOf(e); $("fPL").checked = !!t; $("fPLDue").value = t ? t[1].due : plDefaultDue($("fDate").value || todayISO); $("plDueField").hidden = !t; }
   bill = []; billSlot = null; $("billDisc").value = ""; showBillUI();
+  // an old entry with only a total (sheet rows): fill amount, unit, price and size from the last purchase right away,
+  // since its shop and item are already picked and picking them again fires nothing
+  if (e && e.kind === "expense" && !isTct(e) && !(Number(e.unitPrice) > 0) && !(Number(e.qty) > 0) && e.note) fillFromLast(true);
   updateInstHint();
   showDraft();
 }
