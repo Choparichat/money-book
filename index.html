@@ -489,6 +489,7 @@ details summary{cursor:pointer;font-weight:500}
     <div class="panel srch" id="itmPanel" hidden>
       <h2 id="itmTitle">รายการวัตถุดิบ</h2>
       <div class="hint">ชื่อที่พิมพ์ไม่เหมือนกันจะแยกเป็นคนละรายการ กด “แก้ชื่อ” แล้วพิมพ์หรือเลือกชื่อที่ถูก ทุกรายการที่บันทึกไว้ด้วยชื่อเดิมจะเปลี่ยนตาม (รวมแถวในชีต) ถ้าเลือกชื่อที่มีอยู่แล้วจะรวมเป็นรายการเดียวกัน</div>
+      <div class="chips" id="itmShops" style="margin-top:8px"></div>
       <input type="search" id="itmSearch" placeholder="🔍 ค้นหาชื่อรายการ" aria-label="ค้นหาชื่อรายการ" autocomplete="off" style="margin:8px 0">
       <div class="hint" id="itmCount"></div>
       <div id="itmBulk" class="actions" hidden style="margin:6px 0"></div>
@@ -2221,7 +2222,9 @@ $("itmSearch").addEventListener("input", () => renderItems());
 let itmEdit = null, itmOpen = null, itmBusy = false;
 const itmKey = e => (e.note || e.name || "").trim();
 const itmNorm = t => thaiFold(t).toLowerCase().replace(/[\s.,\-_()\/"'“”]+/g, "");
-const itmPool = () => entries.filter(e => e.kind === "expense" && bizOf(e) !== PERSONAL);
+// each shop keeps its own list: Muan's packaging is not the bangle shop's
+let itmBiz = (() => { try { return localStorage.getItem("money-book-itm-biz") || "Muan"; } catch { return "Muan"; } })();
+const itmPool = () => entries.filter(e => e.kind === "expense" && bizOf(e) !== PERSONAL && bizOf(e) === itmBiz);
 // change these entries everywhere they live: the app's own saved, sheet rows in the sheet itself,
 // and the app's notes about a sheet row (pay, shop, bill, pay-later) moved onto the row's new content
 async function itmPatch(list, patch){
@@ -2248,7 +2251,9 @@ async function itmRename(from, to){
   const nc = settings.noteCats;
   if (nc && nc[from] && !nc[to]) store.setSetting("noteCats", {...nc, [to]: nc[from]});
   const ph = itmPhoto(from);
-  if (ph){ if (!itmPhoto(to)) store.setSetting(itmPicKey(to), ph); store.setSetting(itmPicKey(from), null); }
+  // the photo goes with the name; the old name keeps it while another shop still uses that name
+  const elsewhere = entries.some(e => e.kind === "expense" && bizOf(e) !== itmBiz && itmKey(e) === from);
+  if (ph){ if (!itmPhoto(to)) store.setSetting(itmPicKey(to), ph); if (!elsewhere) store.setSetting(itmPicKey(from), null); }
   await itmPatch(list, {note: to});
   return list.length;
 }
@@ -2310,7 +2315,15 @@ async function itmMove(list, cat, ask){
 }
 function renderItems(){
   const [cat, label, other] = ITM_VIEWS[shopBiz];
-  $("itmTitle").textContent = `รายการ${label.replace(/^\S+\s/, "")}`;
+  const shops = shopList();
+  if (!shops.includes(itmBiz)) itmBiz = shops.includes("Muan") ? "Muan" : shops[0];
+  $("itmTitle").textContent = `รายการ${label.replace(/^\S+\s/, "")} · ${bizLabel(itmBiz)}`;
+  const sb = $("itmShops"); sb.textContent = ""; sb.hidden = shops.length < 2;
+  shops.forEach(b => {
+    const c = el("button", "chip", bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === itmBiz));
+    c.addEventListener("click", () => { itmBiz = b; itmEdit = null; itmOpen = null; try { localStorage.setItem("money-book-itm-biz", b); } catch {} renderItems(); });
+    sb.append(c);
+  });
   const pool = itmPool(), by = new Map();
   for (const e of pool){
     const k = itmKey(e); if (!k) continue;
@@ -2332,7 +2345,7 @@ function renderItems(){
     bk.append(x);
   }
   const box = $("itmList"); box.textContent = "";
-  if (!shown.length){ box.append(el("div", "empty", q ? "ไม่พบรายการที่ค้นหา" : `ยังไม่มีรายการในหมวด${cat}`)); return; }
+  if (!shown.length){ box.append(el("div", "empty", q ? "ไม่พบรายการที่ค้นหา" : `ยังไม่มีรายการในหมวด${cat} ของ ${bizLabel(itmBiz)}`)); return; }
   for (const v of shown){
     v.xs.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
     const row = el("div", "itm-row"), h = el("div", "itm-h");
