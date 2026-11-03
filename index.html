@@ -2364,19 +2364,21 @@ function renderItems(){
     const pieceOf = e => Number(e.unitPrice) > 0 ? Number(e.unitPrice) : Number(e.amount) > 0 ? Number(e.amount) / (Number(e.qty) > 0 ? Number(e.qty) : 1) : 0;
     const each = e => `${fmt(pieceOf(e))} บาท/${e.unit || "ชิ้น"}`;
     // bought from more than one store: each store's last price per piece, the cheapest marked
-    const byStore = shops.map(sh => v.xs.find(e => e.shop === sh && pieceOf(e) > 0)).filter(Boolean);
-    const multi = byStore.length > 1;
+    // every item gets this line, one store or many; a store's name typed with other spacing counts as the same store
+    const stKey = sh => String(sh || "").replace(/\s+/g, "").toLowerCase();
+    const byStore = [...new Map(v.xs.filter(e => e.shop && pieceOf(e) > 0).map(e => [stKey(e.shop), e]).reverse()).values()];
+    const multi = byStore.length > 0;
     const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, !multi && pieceOf(v.xs[0]) > 0 ? each(v.xs[0]) : "", z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", !multi && shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
     const top = el("div", "itm-top"), info = el("div");
     top.append(itmPicBtn(v.name), info); row.append(top);
     info.append(h, el("div", "hint", meta));
     if (multi){
       const low = Math.min(...byStore.map(pieceOf)), line = el("div", "hint itm-st");
-      line.append("ราคาล่าสุด: ");
+      line.append(byStore.length > 1 ? "ราคาล่าสุด: " : "ราคาล่าสุดที่ ");
       byStore.sort((a, b) => pieceOf(a) - pieceOf(b)).forEach((e, i) => {
         if (i) line.append(" · ");
         const best = pieceOf(e) === low && byStore.some(x => pieceOf(x) > low);
-        line.append(el(best ? "strong" : "span", best ? "itm-low" : "", `${e.shop} ${each(e)}${best ? " ✓ ถูกสุด" : ""}`));
+        line.append(el(best ? "strong" : "span", best ? "itm-low" : "", `${e.shop.trim()} ${each(e)}${best ? " ✓ ถูกสุด" : ""}`));
       });
       info.append(line);
     }
