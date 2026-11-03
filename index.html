@@ -490,6 +490,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="hint">ชื่อที่พิมพ์ไม่เหมือนกันจะแยกเป็นคนละรายการ กด “แก้ชื่อ” แล้วพิมพ์หรือเลือกชื่อที่ถูก ทุกรายการที่บันทึกไว้ด้วยชื่อเดิมจะเปลี่ยนตาม (รวมแถวในชีต) ถ้าเลือกชื่อที่มีอยู่แล้วจะรวมเป็นรายการเดียวกัน</div>
       <input type="search" id="itmSearch" placeholder="🔍 ค้นหาชื่อรายการ" aria-label="ค้นหาชื่อรายการ" autocomplete="off" style="margin:8px 0">
       <div class="hint" id="itmCount"></div>
+      <div id="itmBulk" class="actions" hidden style="margin:6px 0"></div>
       <div id="itmList"></div>
       <datalist id="itmNames"></datalist>
       <input type="file" id="itmPicFile" accept="image/*" hidden>
@@ -2297,6 +2298,15 @@ function itmPicBtn(name){
   b.addEventListener("click", () => p ? openPhoto(name) : itmPickPhoto(name));
   return b;
 }
+async function itmMove(list, cat, ask){
+  if (!list.length || !confirm(ask)) return;
+  itmBusy = true; renderItems();
+  // rows filed under "Muan" only knew their shop from that name: keep the shop (and the pay the row showed) when the category changes
+  const groups = new Map();
+  for (const e of list){ const b = bizOf(e), k = b + "\u0000" + (e.pay || ""); if (!groups.has(k)) groups.set(k, {b, pay: e.pay, xs: []}); groups.get(k).xs.push(e); }
+  try { for (const g of groups.values()) await itmPatch(g.xs, {name: cat, ...(g.b !== PERSONAL ? {biz: g.b} : {}), ...(g.pay ? {} : {pay: "เงินสด"})}); toast(`ย้าย ${list.length} รายการไปหมวด ${cat} แล้ว`); } catch (err){ toast(err.message, true); }
+  itmBusy = false; render();
+}
 function renderItems(){
   const [cat, label, other] = ITM_VIEWS[shopBiz];
   $("itmTitle").textContent = `รายการ${label.replace(/^\S+\s/, "")}`;
@@ -2312,6 +2322,14 @@ function renderItems(){
   const q = thaiFold($("itmSearch").value).trim().toLowerCase();
   const shown = mine.filter(v => !q || thaiFold(v.name).toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, "th"));
   $("itmCount").textContent = `${mine.length} ชื่อ เรียงตามตัวอักษร ชื่อที่คล้ายกันจะอยู่ใกล้กัน`;
+  // old sheet rows of these items still filed under the shop's old catch-all category "Muan": move them all here at once
+  const legacy = mine.flatMap(v => v.xs.filter(e => e.name === "Muan"));
+  const bk = $("itmBulk"); bk.textContent = ""; bk.hidden = !legacy.length;
+  if (legacy.length){
+    const x = el("button", "btn sm primary", `ย้ายรายการเก่าหมวด “Muan” ${legacy.length} รายการ มาหมวด${cat}`); x.type = "button"; x.disabled = itmBusy;
+    x.addEventListener("click", () => itmMove(legacy, cat, `ย้ายรายการเก่าหมวด “Muan” ของ ${new Set(legacy.map(itmKey)).size} ชื่อ (${legacy.length} รายการ) ไปหมวด ${cat} ใช่ไหม`));
+    bk.append(x);
+  }
   const box = $("itmList"); box.textContent = "";
   if (!shown.length){ box.append(el("div", "empty", q ? "ไม่พบรายการที่ค้นหา" : `ยังไม่มีรายการในหมวด${cat}`)); return; }
   for (const v of shown){
@@ -2326,7 +2344,12 @@ function renderItems(){
     top.append(itmPicBtn(v.name), info); row.append(top);
     info.append(h, el("div", "hint", meta));
     const inOther = v.xs.filter(e => e.name !== cat);
-    if (inOther.length) info.append(el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")})`));
+    if (inOther.length){
+      const w = el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")}) `);
+      const mv = el("button", "btn sm", `ย้ายมาหมวด${cat.replace(/^ค่า/, "")}`); mv.type = "button"; mv.disabled = itmBusy;
+      mv.addEventListener("click", () => itmMove(inOther, cat, `ย้าย “${v.name}” ${inOther.length} รายการ ไปหมวด ${cat} ใช่ไหม`));
+      w.append(mv); info.append(w);
+    }
     // names that look like the same thing typed another way
     const n0 = itmNorm(v.name);
     const sim = all.filter(w => w !== v && (() => { const n1 = itmNorm(w.name); return n1 === n0 || (Math.min(n0.length, n1.length) >= 3 && (n1.includes(n0) || n0.includes(n1))); })()).slice(0, 3);
