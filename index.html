@@ -3083,6 +3083,14 @@ function fillFromLast(fromShop){
       if (!$("fQty").value || autoQty){ $("fQty").value = Number(last.qty) > 0 ? last.qty : 1; autoQty = true; }
     }
     if (!shop && !fromShop && last && last.shop) setPick(pk.shop, last.shop);
+  } else if (!$("fUnit").value && !$("fQty").value){
+    // editing an old entry (sheet rows have only the total): split its own total by the last price,
+    // so the amount already paid never changes
+    const last = (shop ? atShop : all).find(e => e.unitPrice > 0), amt = parseFloat($("fAmount").value) + (editing.disc || 0) + (editing.itemDisc || 0);
+    if (last && amt > 0){
+      const q = amt / last.unitPrice, whole = Math.abs(q - Math.round(q)) < 1e-6 && Math.round(q) > 0;
+      $("fQty").value = whole ? Math.round(q) : 1; $("fUnit").value = whole ? last.unitPrice : r2(amt);
+    }
   }
   const shop2 = pickVal(pk.shop), atShop2 = shop2 ? all.filter(e => e.shop === shop2) : [];
   // the unit and the size per unit come from the last entry at this shop that had them, else any entry
