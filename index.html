@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -484,6 +484,14 @@ details summary{cursor:pointer;font-weight:500}
         <thead><tr><th>ร้าน</th><th class="n">ราคาล่าสุด</th><th class="n">เทียบ</th></tr></thead>
         <tbody id="mCmp"></tbody>
       </table></div>
+    </div>
+    <div class="panel srch" id="itmPanel" hidden>
+      <h2 id="itmTitle">รายการวัตถุดิบ</h2>
+      <div class="hint">ชื่อที่พิมพ์ไม่เหมือนกันจะแยกเป็นคนละรายการ กด “แก้ชื่อ” แล้วพิมพ์หรือเลือกชื่อที่ถูก ทุกรายการที่บันทึกไว้ด้วยชื่อเดิมจะเปลี่ยนตาม (รวมแถวในชีต) ถ้าเลือกชื่อที่มีอยู่แล้วจะรวมเป็นรายการเดียวกัน</div>
+      <input type="search" id="itmSearch" placeholder="🔍 ค้นหาชื่อรายการ" aria-label="ค้นหาชื่อรายการ" autocomplete="off" style="margin:8px 0">
+      <div class="hint" id="itmCount"></div>
+      <div id="itmList"></div>
+      <datalist id="itmNames"></datalist>
     </div>
     <div class="tiles t3">
       <div class="tile inc"><span class="k">รายรับร้าน</span><span class="v num" id="mInc">0</span></div>
@@ -839,6 +847,9 @@ let mode = "month";
 let curYM = todayISO.slice(0,7);
 let shopBiz = "Muan";
 const CMP = "\u0000cmp";
+// chips next to the shops that list every item of one category, to tidy up names typed differently
+const ITM_VIEWS = {"\u0000raw": ["ค่าวัตถุดิบ", "🥚 วัตถุดิบ", "ค่าบรรจุภัณฑ์"], "\u0000pkg": ["ค่าบรรจุภัณฑ์", "📦 บรรจุภัณฑ์", "ค่าวัตถุดิบ"]};
+const shopView = b => b === CMP || b in ITM_VIEWS;
 const listFilter = {income: "", expense: ""};
 const listLimit = {};
 
@@ -2032,13 +2043,14 @@ function savingLedger(box, rows){
 function shopList(){ return bizList().filter(b => b !== PERSONAL); }
 function renderShop(P){
   const shops = shopList();
-  if (!shops.includes(shopBiz) && shopBiz !== CMP) shopBiz = shops[0];
+  if (!shops.includes(shopBiz) && !shopView(shopBiz)) shopBiz = shops[0];
   const box = $("shopChips"); box.textContent = "";
-  [...shops, CMP].forEach(b => { const c = el("button", "chip", b === CMP ? "⚖ เทียบราคา" : bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
+  [...shops, ...Object.keys(ITM_VIEWS), CMP].forEach(b => { const c = el("button", "chip", b === CMP ? "⚖ เทียบราคา" : b in ITM_VIEWS ? ITM_VIEWS[b][1] : bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
   document.querySelector('#tabs [data-page="shop"]').textContent = "Muan";
   // the เทียบราคา chip swaps the page for the price comparison, over every shop's purchases
-  const cmp = shopBiz === CMP;
-  for (const x of $("page-shop").children) if (x !== box) x.hidden = cmp !== (x.id === "cmpPanel");
+  const cmp = shopBiz === CMP, itm = shopBiz in ITM_VIEWS, want = cmp ? "cmpPanel" : itm ? "itmPanel" : "";
+  for (const x of $("page-shop").children) if (x !== box) x.hidden = want ? x.id !== want : x.id === "cmpPanel" || x.id === "itmPanel";
+  if (itm){ renderItems(); return; }
   if (cmp){ renderCompare(entries.filter(e => bizOf(e) !== PERSONAL && e.kind === "expense"), e => (e.note || e.name || "").trim()); return; }
   const L = P.filter(e => bizOf(e) === shopBiz), all = entries.filter(e => bizOf(e) === shopBiz && e.kind === "expense");
   const s = sums(L);
@@ -2172,6 +2184,110 @@ function renderCompare(all, itemKey){
   }
 }
 $("cmpSearch").addEventListener("input", () => renderCompare());
+$("itmSearch").addEventListener("input", () => renderItems());
+
+/* ---------- one category's items (วัตถุดิบ / บรรจุภัณฑ์): rename or merge names typed differently ---------- */
+let itmEdit = null, itmOpen = null, itmBusy = false;
+const itmKey = e => (e.note || e.name || "").trim();
+const itmNorm = t => thaiFold(t).toLowerCase().replace(/[\s.,\-_()\/"'“”]+/g, "");
+const itmPool = () => entries.filter(e => e.kind === "expense" && bizOf(e) !== PERSONAL);
+// change these entries everywhere they live: the app's own saved, sheet rows in the sheet itself,
+// and the app's notes about a sheet row (pay, shop, bill, pay-later) moved onto the row's new content
+async function itmPatch(list, patch){
+  const now = new Date().toISOString();
+  const rows = list.filter(e => e.src === "sheet"), app = list.filter(e => e.src !== "sheet");
+  if (rows.length){
+    const m = rows.reduce((m, e) => setSheetPay({...e, amount: sheetAmt(e)}, {...e, ...patch}, m), {...sheetPays()});
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  const pl = {...plTags()};
+  list.forEach(e => { const t = plTagOf(e); if (t) pl[t[0]] = {...t[1], ...("note" in patch ? {note: patch.note} : {}), ...("name" in patch ? {name: patch.name} : {})}; });
+  if (JSON.stringify(pl) !== JSON.stringify(plTags())) store.setSetting("payLater", pl);
+  if (app.length) await store.save(app.map(e => ({...e, ...patch, updatedAt: now})));
+  for (const e of rows) await store.sheetEdit(e, {...e, ...patch});
+}
+async function itmRename(from, to){
+  const list = itmPool().filter(e => itmKey(e) === from);
+  if (!list.length || from === to) return 0;
+  // what the app remembers per item name goes with it, unless the new name already has its own
+  const sz = settings.itemSizes || {};
+  if (sz[from] && !sz[to]) store.setSetting("itemSizes", {...sz, [to]: sz[from]});
+  const sk = settings.sizeSkip || [];
+  if (sk.includes(from) && !sk.includes(to)) store.setSetting("sizeSkip", [...sk, to]);
+  const nc = settings.noteCats;
+  if (nc && nc[from] && !nc[to]) store.setSetting("noteCats", {...nc, [to]: nc[from]});
+  await itmPatch(list, {note: to});
+  return list.length;
+}
+function renderItems(){
+  const [cat, label, other] = ITM_VIEWS[shopBiz];
+  $("itmTitle").textContent = `รายการ${label.replace(/^\S+\s/, "")}`;
+  const pool = itmPool(), by = new Map();
+  for (const e of pool){
+    const k = itmKey(e); if (!k) continue;
+    const v = by.get(k) || by.set(k, {name: k, xs: [], cats: new Set()}).get(k);
+    v.xs.push(e); v.cats.add(e.name || "");
+  }
+  const all = [...by.values()], mine = all.filter(v => v.cats.has(cat));
+  const dl = $("itmNames"); dl.textContent = "";
+  all.map(v => v.name).sort((a, b) => a.localeCompare(b, "th")).forEach(n => dl.append(opt(n, n)));
+  const q = thaiFold($("itmSearch").value).trim().toLowerCase();
+  const shown = mine.filter(v => !q || thaiFold(v.name).toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, "th"));
+  $("itmCount").textContent = `${mine.length} ชื่อ เรียงตามตัวอักษร ชื่อที่คล้ายกันจะอยู่ใกล้กัน`;
+  const box = $("itmList"); box.textContent = "";
+  if (!shown.length){ box.append(el("div", "empty", q ? "ไม่พบรายการที่ค้นหา" : `ยังไม่มีรายการในหมวด${cat}`)); return; }
+  for (const v of shown){
+    v.xs.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+    const row = el("div", "itm-row"), h = el("div", "itm-h");
+    const total = v.xs.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    h.append(el("strong", "", v.name), el("span", "num", fmt(total)));
+    const shops = [...new Set(v.xs.map(e => e.shop).filter(Boolean))];
+    const z = sizeRaw(v.xs[0]), c = v.xs.map(costPer).find(Boolean);
+    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
+    row.append(h, el("div", "hint", meta));
+    const inOther = v.xs.filter(e => e.name !== cat);
+    if (inOther.length) row.append(el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")})`));
+    // names that look like the same thing typed another way
+    const n0 = itmNorm(v.name);
+    const sim = all.filter(w => w !== v && (() => { const n1 = itmNorm(w.name); return n1 === n0 || (Math.min(n0.length, n1.length) >= 3 && (n1.includes(n0) || n0.includes(n1))); })()).slice(0, 3);
+    const acts = el("div", "itm-a");
+    const b = (t, f, cls) => { const x = el("button", "btn sm" + (cls ? " " + cls : ""), t); x.type = "button"; x.disabled = itmBusy; x.addEventListener("click", f); acts.append(x); return x; };
+    const editing = itmEdit && itmEdit.name === v.name;
+    b("✎ แก้ชื่อ", () => { itmEdit = editing ? null : {name: v.name, to: v.name, fresh: true}; renderItems(); });
+    sim.forEach(w => b(`รวมกับ “${w.name}”`, () => { itmEdit = {name: v.name, to: w.name, fresh: true}; renderItems(); }));
+    b(`ย้ายไปหมวด${other.replace(/^ค่า/, "")}`, async () => {
+      const L = v.xs.filter(e => e.name !== other);
+      if (!confirm(`ย้าย “${v.name}” ${L.length} รายการ ไปหมวด ${other} ใช่ไหม`)) return;
+      itmBusy = true; renderItems();
+      try { await itmPatch(L, {name: other}); toast(`ย้าย “${v.name}” ไปหมวด ${other} แล้ว`); } catch (err){ toast(err.message, true); }
+      itmBusy = false; render();
+    });
+    b(itmOpen === v.name ? "ซ่อนรายการ" : "ดูรายการ", () => { itmOpen = itmOpen === v.name ? null : v.name; renderItems(); });
+    row.append(acts);
+    if (editing){
+      const f = el("div", "itm-ed"), inp = document.createElement("input");
+      inp.value = itmEdit.to; inp.setAttribute("list", "itmNames"); inp.setAttribute("aria-label", "ชื่อใหม่ของ " + v.name);
+      inp.addEventListener("input", () => { itmEdit.to = inp.value; });
+      const ok = el("button", "btn sm primary", "บันทึกชื่อ"), no = el("button", "btn sm", "ยกเลิก"); ok.type = no.type = "button";
+      const go = async () => {
+        const to = inp.value.trim().replace(/\s+/g, " ");
+        if (!to){ inp.focus(); return; }
+        if (to === v.name){ itmEdit = null; renderItems(); return; }
+        const into = by.get(to);
+        if (!confirm(into ? `รวม “${v.name}” ${v.xs.length} รายการ เข้ากับ “${to}” (มีอยู่แล้ว ${into.xs.length} รายการ) ใช่ไหม` : `เปลี่ยนชื่อ “${v.name}” เป็น “${to}” ทั้ง ${v.xs.length} รายการ ใช่ไหม`)) return;
+        itmBusy = true; itmEdit = null; renderItems();
+        try { const n = await itmRename(v.name, to); toast(`${into ? "รวม" : "เปลี่ยนชื่อ"} ${n} รายการเป็น “${to}” แล้ว`); } catch (err){ toast(err.message, true); }
+        itmBusy = false; render();
+      };
+      ok.addEventListener("click", go); no.addEventListener("click", () => { itmEdit = null; renderItems(); });
+      inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go(); } });
+      f.append(inp, ok, no); row.append(f);
+      if (itmEdit.fresh){ itmEdit.fresh = false; setTimeout(() => inp.focus(), 0); }
+    }
+    if (itmOpen === v.name){ const lb = el("div", "list"); entryList(lb, v.xs, "itm"); row.append(lb); }
+    box.append(row);
+  }
+}
 $("cmpOne").addEventListener("change", () => renderCompare());
 
 
@@ -3083,7 +3199,7 @@ function openForm(e){
     fillAcc(e.account || "");
     if (isTct(e)){ $("fAmount").value = tctFull(e); itemGross = r2(tctFull(e) + (e.itemDisc || 0)); showTct(); }
   } else {
-    if (page === "shop") { setPick(pk.biz, shopBiz === CMP ? shopList()[0] : shopBiz); fillNames(""); fillNotes(""); }
+    if (page === "shop") { setPick(pk.biz, shopView(shopBiz) ? shopList()[0] : shopBiz); fillNames(""); fillNotes(""); }
     // a day picked on the calendar is the day the new entry goes on
     $("fDate").value = dayPick || (mode === "month" && curYM !== todayISO.slice(0,7) ? curYM + "-01" : todayISO);
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
