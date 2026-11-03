@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.itm-pic{flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.itm-pic{flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -2361,12 +2361,25 @@ function renderItems(){
     const shops = [...new Set(v.xs.map(e => e.shop).filter(Boolean))];
     const z = sizeRaw(v.xs[0]), c = v.xs.map(costPer).find(Boolean);
     // what one piece cost the last time (the price per piece typed, else the amount paid ÷ how many)
-    const e0 = v.xs[0], up = Number(e0.unitPrice) > 0 ? Number(e0.unitPrice) : Number(e0.amount) > 0 ? Number(e0.amount) / (Number(e0.qty) > 0 ? Number(e0.qty) : 1) : 0;
-    const each = up > 0 ? `${fmt(up)} บาท/${e0.unit || "ชิ้น"}` : "";
-    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, each, z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
+    const pieceOf = e => Number(e.unitPrice) > 0 ? Number(e.unitPrice) : Number(e.amount) > 0 ? Number(e.amount) / (Number(e.qty) > 0 ? Number(e.qty) : 1) : 0;
+    const each = e => `${fmt(pieceOf(e))} บาท/${e.unit || "ชิ้น"}`;
+    // bought from more than one store: each store's last price per piece, the cheapest marked
+    const byStore = shops.map(sh => v.xs.find(e => e.shop === sh && pieceOf(e) > 0)).filter(Boolean);
+    const multi = byStore.length > 1;
+    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, !multi && pieceOf(v.xs[0]) > 0 ? each(v.xs[0]) : "", z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", !multi && shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
     const top = el("div", "itm-top"), info = el("div");
     top.append(itmPicBtn(v.name), info); row.append(top);
     info.append(h, el("div", "hint", meta));
+    if (multi){
+      const low = Math.min(...byStore.map(pieceOf)), line = el("div", "hint itm-st");
+      line.append("ราคาล่าสุด: ");
+      byStore.sort((a, b) => pieceOf(a) - pieceOf(b)).forEach((e, i) => {
+        if (i) line.append(" · ");
+        const best = pieceOf(e) === low && byStore.some(x => pieceOf(x) > low);
+        line.append(el(best ? "strong" : "span", best ? "itm-low" : "", `${e.shop} ${each(e)}${best ? " ✓ ถูกสุด" : ""}`));
+      });
+      info.append(line);
+    }
     const inOther = v.xs.filter(e => e.name !== cat);
     if (inOther.length){
       const w = el("div", "hint itm-sim", `⚠ ${inOther.length} จาก ${v.xs.length} รายการอยู่หมวดอื่น (${[...new Set(inOther.map(e => e.name || "ไม่ระบุหมวด"))].join(", ")}) `);
