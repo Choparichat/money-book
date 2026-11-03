@@ -295,7 +295,7 @@ label.btn{display:inline-block}
 .tag.memo{white-space:normal;background:color-mix(in srgb,var(--accent) 12%,var(--sunk))}
 .selbar{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--surface);border-top:1px solid var(--line);padding:10px max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;box-shadow:0 -4px 14px rgba(0,0,0,.2)}
 .selbar .selbtns{display:flex;gap:6px;flex-wrap:wrap}
-.item.selectable{padding-left:44px;position:relative}
+.item.selectable,.item.selectable.inbill,.item.selectable.inbill.hascat{padding-left:44px;position:relative}
 .item.selectable::before{content:"";position:absolute;left:14px;top:50%;width:18px;height:18px;margin-top:-9px;border:2px solid var(--muted);border-radius:5px}
 .item.selectable.picked::before{background:var(--accent);border-color:var(--accent)}
 .item.selectable.picked{background:var(--sav-soft)}
