@@ -1100,15 +1100,20 @@ function payText(e){ return [e.pay, e.account].filter(Boolean).join(" · ") + (i
 // Order inside a day can be set by press-and-hold then drag; kept in synced settings as {day: [keys]}.
 const orderKey = e => e.billId ? "b:" + e.billId : e.id;
 function dayRank(e){ const l = (settings.dayOrder || {})[e.date]; const i = l ? l.indexOf(orderKey(e)) : -1; return i < 0 ? Infinity : i; }
-function makeDraggable(block, day, key){
-  block.dataset.day = day; block.dataset.key = key; block.classList.add("drag-ok");
+// Items inside one bill are ordered the same way, kept as {billId: [entry ids]}.
+function billRank(e){ const l = (settings.billOrder || {})[e.billId]; const i = l ? l.indexOf(e.id) : -1; return i < 0 ? Infinity : i; }
+const byBillRank = list => list.map((e, i) => [e, i]).sort(([a, ia], [b, ib]) => (billRank(a) - billRank(b)) || (ia - ib)).map(([e]) => e);
+// grp names the blocks that swap places with each other; save gets their keys in the new order
+function makeDraggable(block, grp, key, save){
+  save = save || (keys => store.setSetting("dayOrder", {...(settings.dayOrder || {}), [grp]: keys}));
+  block.dataset.grp = grp; block.dataset.key = key; block.classList.add("drag-ok");
   let timer = null, startY = 0, startX = 0, dragging = false, moved = false;
   const stopTimer = () => { clearTimeout(timer); timer = null; };
   // moving the row in the page drops pointer capture, so follow the pointer on the whole document while dragging
   const move = ev => {
     if (!dragging) return;
     ev.preventDefault(); moved = true;
-    const sibs = [...block.parentElement.children].filter(x => x !== block && x.dataset.day === day);
+    const sibs = [...block.parentElement.children].filter(x => x !== block && x.dataset.grp === grp);
     for (const s of sibs){
       const r = s.getBoundingClientRect(), mid = r.top + r.height / 2;
       const below = block.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING;
@@ -1128,11 +1133,12 @@ function makeDraggable(block, day, key){
     document.addEventListener("click", eat, {capture: true, once: true});
     setTimeout(() => document.removeEventListener("click", eat, {capture: true}), 400);
     if (!moved) return;
-    const keys = [...block.parentElement.children].filter(x => x.dataset.day === day).map(x => x.dataset.key);
-    store.setSetting("dayOrder", {...(settings.dayOrder || {}), [day]: keys});
+    save([...block.parentElement.children].filter(x => x.dataset.grp === grp).map(x => x.dataset.key));
   };
   block.addEventListener("pointerdown", ev => {
     if (ev.button > 0) return;
+    // an item held inside a bill moves within the bill, not the whole bill
+    ev.stopPropagation();
     startY = ev.clientY; startX = ev.clientX; moved = false;
     stopTimer(); timer = setTimeout(() => {
       timer = null; dragging = true; block.classList.add("dragging");
@@ -1196,7 +1202,7 @@ function entryList(box, list, key){
     if (e.billId){
       // one shopping trip: a header with the bill total, then each item
       shownBills.add(e.billId);
-      const items = rows.filter(x => x.billId === e.billId);
+      const items = byBillRank(rows.filter(x => x.billId === e.billId));
       const disc = items.reduce((a, x) => a + (Number(x.disc) || 0), 0), net = items.reduce((a, x) => a + (Number(x.amount) || 0), 0);
       const hd = el("div", "billrow");
       const bs = billShop(items);
@@ -1207,7 +1213,8 @@ function entryList(box, list, key){
       hd.addEventListener("click", () => { if (selMode){ items.forEach(x => selIds.add(x.id)); render(); } else openBill(bid); }); hd.addEventListener("keydown", ev => { if (ev.key === "Enter") openBill(bid); });
       // one framed box per bill, so an item bought separately that day never looks like part of it
       const grp = el("div", "billgrp"); grp.append(hd);
-      items.forEach(x => grp.append(entryItem(x, true)));
+      items.forEach(x => { const one = entryItem(x, true); grp.append(one);
+        makeDraggable(one, "bill:" + bid, x.id, ids => store.setSetting("billOrder", {...(settings.billOrder || {}), [bid]: ids})); });
       makeDraggable(grp, e.date, orderKey(e));
       box.append(grp);
       continue;
@@ -3670,7 +3677,7 @@ function itemToForm(it){
 // A saved bill opens as a draft again; saving replaces its items.
 let billEdit = null;
 function openBill(billId){
-  const items = entries.filter(x => x.billId === billId).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const items = byBillRank(entries.filter(x => x.billId === billId).sort((a, b) => (a.id < b.id ? -1 : 1)));
   if (!items.length) return;
   // a bill made by grouping rows from the sheet: rows stay as they are, so offer to ungroup instead
   if (items.some(x => x.src === "sheet")){ if ($("dayDlg").open) $("dayDlg").close(); selMode = true; selIds = new Set(items.map(x => x.id)); render(); return; }
