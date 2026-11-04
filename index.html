@@ -3345,7 +3345,15 @@ function updateAmount(){
   if (g > 0) $("fAmount").value = Math.max(0, g - itemDiscOf(g) - less).toFixed(2);
   showItemDisc(); updateInstHint();
 }
-["fUnit", "fQty", "fItemDisc"].forEach(id => $(id).addEventListener("input", updateAmount));
+// whichever of total or price per unit was typed last leads: typing the total (80) and then the count (2)
+// gives a price per unit of 40; typing the price leads to the total as before
+let amtLeads = false;
+["fUnit", "fItemDisc"].forEach(id => $(id).addEventListener("input", () => { if (id === "fUnit") amtLeads = false; updateAmount(); }));
+$("fQty").addEventListener("input", () => {
+  const q = parseFloat($("fQty").value);
+  if ((amtLeads || !(parseFloat($("fUnit").value) > 0)) && itemGross > 0 && q > 0){ $("fUnit").value = r2(itemGross / q); showItemDisc(); updateInstHint(); }
+  else updateAmount();
+});
 $("fItemDiscType").addEventListener("change", updateAmount);
 function showSize(){
   const c = costPer({size: parseFloat($("fSize").value), sizeUnit: $("fSizeUnit").value, qty: parseFloat($("fQty").value), amount: parseFloat($("fAmount").value)}), h = $("sizeHint");
@@ -3355,10 +3363,11 @@ function showSize(){
 ["fSize", "fQty", "fUnit", "fAmount", "fItemDisc"].forEach(id => $(id).addEventListener("input", showSize));
 ["fSizeUnit", "fItemDiscType"].forEach(id => $(id).addEventListener("change", showSize));
 $("fAmount").addEventListener("input", () => {
+  amtLeads = true;
   const a = parseFloat($("fAmount").value) + (editing?.disc || 0), q = parseFloat($("fQty").value);
   const v = parseFloat($("fItemDisc").value) || 0, pct = $("fItemDiscType").value === "pct";
   itemGross = a > 0 ? r2(v > 0 ? (pct ? (v < 100 ? a / (1 - v / 100) : a) : a + v) : a) : 0;
-  if (itemGross > 0 && q > 0) $("fUnit").value = (itemGross / q).toFixed(2);
+  if (itemGross > 0 && q > 0) $("fUnit").value = r2(itemGross / q);
   showItemDisc(); updateInstHint();
 });
 for (let i = 1; i <= 24; i++) $("fInstN").append(opt(String(i), i === 1 ? "1 งวด (จ่ายครั้งเดียว)" : `${i} งวด`));
@@ -3392,7 +3401,7 @@ function openForm(e){
   $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && (e.instId || e.billId));
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
-  $("entryForm").reset(); $("shopPriceHint").hidden = true; autoQty = false;
+  $("entryForm").reset(); $("shopPriceHint").hidden = true; autoQty = false; amtLeads = false;
   itemGross = 0; $("itemDiscHint").hidden = true; $("sizeHint").hidden = true;
   setKind(k, true);
   if (e){
