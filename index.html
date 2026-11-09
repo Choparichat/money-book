@@ -1341,7 +1341,7 @@ function entryItem(e, inBill){
     const plt = e.kind === "expense" && plTagOf(e);
     if (plt) tags.push({pl: `💳 TikTok Pay Later · ครบ ${thaiDate(plt[1].due).slice(0, 5)}${plPaid()[plt[1].due] ? " · จ่ายแล้ว" : ""}`});
     if (payText(e) && !(plt && (!e.pay || e.pay === "เงินสด"))) tags.push((e.account && accColor(e.account)) || accColor(e.pay) ? {pay: e} : payText(e));
-    if (e.inst) tags.push("งวด " + e.inst);
+    if (e.inst){ const b = e.instId && plInstBill(e); tags.push(b ? {pl: `งวด ${e.inst} · 💳 รวมในบิล TikTok ครบ ${thaiDate(b.due).slice(0, 5)}${plPaid()[b.due] ? " · จ่ายแล้ว" : ""}`} : "งวด " + e.inst); }
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
     if (memoOf(e)) tags.push({memo: memoOf(e)});
@@ -2848,6 +2848,16 @@ function plGroups(){
     v.total = c2(v.total + amount);
   }
   return [...g.values()].sort((a, b) => a.due < b.due ? -1 : 1);
+}
+// the Pay Later bill an installment entry is billed in (null if none), looked up once per redraw
+let plIBKey = null, plIB = new Map();
+function plInstBill(e){
+  if (!plIBKey || plIBKey[0] !== allEntries || plIBKey[1] !== plTags() || plIBKey[2] !== payPlans()){
+    plIB = new Map(); plGroups().forEach(g => (g.inst || []).forEach(d => plIB.set(d.plan.id + ":" + d.i, g)));
+    plIBKey = [allEntries, plTags(), payPlans()];
+  }
+  const [k] = String(e.inst || "1/1").split("/").map(Number);
+  return plIB.get("e:" + e.instId + ":" + ((k || 1) - 1)) || null;
 }
 const plMerged = () => new Set(plGroups().flatMap(g => (g.inst || []).map(d => d.plan.id + ":" + d.i)));
 // mark the installments inside a bill paid or not, together with the bill
