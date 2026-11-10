@@ -320,6 +320,11 @@ dialog form{display:grid;gap:10px;padding:16px;overflow:auto}
 .ocrtext{white-space:pre-wrap;font-size:.75rem;max-height:140px;overflow:auto;background:var(--surface);border-radius:6px;padding:6px 8px;margin:6px 0 0}
 details summary{cursor:pointer;font-weight:500}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.inst-what summary{cursor:pointer;white-space:nowrap}
+.inst-what ol{margin:6px 0 0;padding-left:1.4em;min-width:16em}
+.inst-what li{padding:3px 0;border-bottom:1px solid var(--line)}
+.inst-what li:last-child{border-bottom:0}
+.inst-what li > span.n{float:right;margin-left:10px;color:var(--ink, inherit)}
 </style>
 </head>
 <body>
@@ -2559,10 +2564,19 @@ $("fundDel").addEventListener("click", () => {
 /* ---------- installments ---------- */
 // What is still owed, one row per month: that month's TikTok Pay Later bill (with any installment billed in it)
 // plus every other installment due that month.
+// "มีอะไรบ้าง": folded to a count by default, tap to see one numbered line per item; stays open across redraws
+const instOpen = new Set();
+function whatCell(k, list){
+  const td = el("td", "hint"), d = el("details", "inst-what"), sm = el("summary", "", `${list.length} รายการ`), ol = el("ol");
+  d.open = instOpen.has(k);
+  d.addEventListener("toggle", () => { if (d.open) instOpen.add(k); else instOpen.delete(k); });
+  list.forEach(x => { const li = el("li"); li.append(el("span", "", x.what), el("span", "n", fmt(x.amount))); ol.append(li); });
+  d.append(sm, ol); td.append(d); return td;
+}
 function renderInstallments(box){
   box.textContent = "";
   const paid = plPaid(), merged = new Set(), rows = new Map();
-  const add = (date, amount, what) => { const k = date.slice(0, 7), v = rows.get(k) || {date, total: 0, what: []}; if (date < v.date) v.date = date; v.total = c2(v.total + amount); v.what.push(what); rows.set(k, v); };
+  const add = (date, amount, what) => { const k = date.slice(0, 7), v = rows.get(k) || {date, total: 0, what: []}; if (date < v.date) v.date = date; v.total = c2(v.total + amount); v.what.push({what, amount}); rows.set(k, v); };
   for (const g of plGroups()){
     (g.inst || []).forEach(d => merged.add(d.plan.id + ":" + d.i));
     if (paid[g.due]) continue;
@@ -2582,7 +2596,7 @@ function renderInstallments(box){
   [...rows.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1).forEach(([k, v]) => {
     sum = c2(sum + v.total);
     const tr = el("tr");
-    tr.append(el("td", "", `${"ม.ค. ก.พ. มี.ค. เม.ย. พ.ค. มิ.ย. ก.ค. ส.ค. ก.ย. ต.ค. พ.ย. ธ.ค.".split(" ")[+k.slice(5) - 1]} ${k.slice(0, 4)}`), el("td", "n" + (v.date < todayISO ? " neg" : ""), fmt(v.total)), el("td", "", thaiDate(v.date).slice(0, 5)), el("td", "hint", v.what.join(" · ")));
+    tr.append(el("td", "", `${"ม.ค. ก.พ. มี.ค. เม.ย. พ.ค. มิ.ย. ก.ค. ส.ค. ก.ย. ต.ค. พ.ย. ธ.ค.".split(" ")[+k.slice(5) - 1]} ${k.slice(0, 4)}`), el("td", "n" + (v.date < todayISO ? " neg" : ""), fmt(v.total)), el("td", "", thaiDate(v.date).slice(0, 5)), whatCell(k, v.what));
     tb.append(tr);
   });
   t.append(tb);
