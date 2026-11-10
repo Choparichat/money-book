@@ -324,6 +324,8 @@ details summary{cursor:pointer;font-weight:500}
 .inst-what ol{margin:6px 0 0;padding-left:1.4em;min-width:16em}
 .inst-what li{padding:3px 0;border-bottom:1px solid var(--line)}
 .inst-what li:last-child{border-bottom:0}
+.inst-what li.tap{cursor:pointer}
+.inst-what li.tap:hover{color:var(--ink, inherit)}
 .inst-what li > span.n{float:right;margin-left:10px;color:var(--ink, inherit)}
 </style>
 </head>
@@ -686,6 +688,7 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
+    <label class="check" id="instAllRow" hidden><input type="checkbox" id="fInstAll" checked> ใช้ยอดนี้กับทุกงวดของรายการนี้ (งวดสุดท้ายรับเศษให้ ยอดรวมเท่าเดิม) <span class="hint" id="instAllHint"></span></label>
     <div class="field"><label for="fMemo">หมายเหตุ</label><input id="fMemo" autocomplete="off" placeholder="เช่น ราคาจริง 489.99 แต่คนส่งเก็บรวม 904"></div>
     <div class="pl-row" id="plRow" hidden>
       <label class="check"><input type="checkbox" id="fPL"> 💳 จ่ายด้วย TikTok Pay Later (จ่ายเต็มรอบเดียว)</label>
@@ -2570,13 +2573,17 @@ function whatCell(k, list){
   const td = el("td", "hint"), d = el("details", "inst-what"), sm = el("summary", "", `${list.length} รายการ`), ol = el("ol");
   d.open = instOpen.has(k);
   d.addEventListener("toggle", () => { if (d.open) instOpen.add(k); else instOpen.delete(k); });
-  list.forEach(x => { const li = el("li"); li.append(el("span", "", x.what), el("span", "n", fmt(x.amount))); ol.append(li); });
+  list.forEach(x => {
+    const li = el("li"); li.append(el("span", "", x.what), el("span", "n", fmt(x.amount)));
+    if (x.e){ li.classList.add("tap"); li.title = "แตะเพื่อแก้ยอดงวดนี้"; li.addEventListener("click", () => openForm(x.e)); }
+    ol.append(li);
+  });
   d.append(sm, ol); td.append(d); return td;
 }
 function renderInstallments(box){
   box.textContent = "";
   const paid = plPaid(), merged = new Set(), rows = new Map();
-  const add = (date, amount, what) => { const k = date.slice(0, 7), v = rows.get(k) || {date, total: 0, what: []}; if (date < v.date) v.date = date; v.total = c2(v.total + amount); v.what.push({what, amount}); rows.set(k, v); };
+  const add = (date, amount, what, e) => { const k = date.slice(0, 7), v = rows.get(k) || {date, total: 0, what: []}; if (date < v.date) v.date = date; v.total = c2(v.total + amount); v.what.push({what, amount, e}); rows.set(k, v); };
   for (const g of plGroups()){
     (g.inst || []).forEach(d => merged.add(d.plan.id + ":" + d.i));
     if (paid[g.due]) continue;
@@ -2586,7 +2593,7 @@ function renderInstallments(box){
   entries.filter(e => e.instId && e.date > todayISO).forEach(e => {
     const [k, n] = String(e.inst || "1/1").split("/").map(Number);
     if (merged.has("e:" + e.instId + ":" + ((k || 1) - 1))) return;
-    add(tiktokDay(e.date, e.account), Number(e.amount) || 0, `${e.note || e.name || "ผ่อน"} งวด ${e.inst || ""}${e.account ? " · " + e.account : ""}`);
+    add(tiktokDay(e.date, e.account), Number(e.amount) || 0, `${e.note || e.name || "ผ่อน"} งวด ${e.inst || ""}${e.account ? " · " + e.account : ""}`, e);
   });
   planDues().filter(d => !d.paid && !merged.has(d.plan.id + ":" + d.i)).forEach(d => add(tiktokDay(d.date, d.plan.account), d.amount, `${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}${d.plan.account ? " · " + d.plan.account : ""}`));
   if (!rows.size){ box.append(el("div", "empty", "ไม่มียอดผ่อนค้าง กด \"＋ เพิ่มตารางจ่าย\" ด้านล่างได้เลย")); renderPayPlans(box); return; }
@@ -3404,6 +3411,28 @@ $("fAmount").addEventListener("input", () => {
 for (let i = 1; i <= 24; i++) $("fInstN").append(opt(String(i), i === 1 ? "1 งวด (จ่ายครั้งเดียว)" : `${i} งวด`));
 $("fInstN").value = "3";
 ["fInstN", "fInstStart"].forEach(id => $(id).addEventListener("change", updateInstHint));
+// TikTok splits each piece on its own: every installment but the last is the piece's price ÷ n rounded down
+// to the satang, summed over the pieces; the last installment takes what is left of the total
+function instPer(amount, n, qty){
+  const q = Number(qty), c = Math.round(amount * 100);
+  if (!(q > 1) || q !== Math.floor(q) || q > 100) return Math.floor(c / n) / 100;
+  const unit = Math.floor(c / q), extra = c - unit * q; // pieces in satang: the first `extra` pieces carry one satang more
+  return (extra * Math.floor((unit + 1) / n) + (q - extra) * Math.floor(unit / n)) / 100;
+}
+// the other installments of the one being edited, for "same amount on every installment"
+function instMates(e){
+  if (!e || !e.instId) return null;
+  const all = entries.filter(x => x.instId === e.instId && x.src !== "sheet");
+  const nOf = x => Number(String(x.inst || "").split("/")[1]) || all.length, kOf = x => Number(String(x.inst || "").split("/")[0]) || 0;
+  const n = nOf(e); if (all.length !== n || n < 2 || kOf(e) === n) return null;
+  return {all: all.sort((a, b) => kOf(a) - kOf(b)), n, total: c2(all.reduce((a, x) => a + (Number(x.amount) || 0), 0))};
+}
+function updateInstAll(){
+  const m = instMates(editing); $("instAllRow").hidden = !m; if (!m) return;
+  const a = c2(parseFloat($("fAmount").value) || 0), last = c2(m.total - a * (m.n - 1));
+  $("instAllHint").textContent = a > 0 && last > 0 ? `→ งวด 1-${m.n - 1} งวดละ ${fmt(a)} · งวด ${m.n} ${fmt(last)} · รวม ${fmt(m.total)}` : "";
+}
+$("fAmount").addEventListener("input", updateInstAll);
 function updateInstHint(){
   const show = !$("instRow").hidden;
   $("instHint").hidden = !show;
@@ -3454,6 +3483,7 @@ function openForm(e){
     $("fInstStart").value = addMonths(todayISO.slice(0,7), 1);
   }
   sheetMode(e);
+  updateInstAll();
   $("ppFromEntry").hidden = !(e && e.kind === "expense");
   $("plRow").hidden = kind !== "expense";
   { const t = e && plTagOf(e); $("fPL").checked = !!t; $("fPLDue").value = t ? t[1].due : plDefaultDue($("fDate").value || todayISO); $("plDueField").hidden = !t; if (t) plFormFill(); }
@@ -3580,11 +3610,17 @@ $("entryForm").addEventListener("submit", async ev => {
   const out = [];
   if (editing){
     out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {}), ...(editing.billId ? {billId: editing.billId} : {}), ...(editing.disc ? {disc: editing.disc} : {})});
+    // a TikTok installment fixed to the statement: every installment but the last gets this amount, the last the rest
+    const m = !$("instAllRow").hidden && $("fInstAll").checked && instMates(editing);
+    if (m && amount > 0 && amount !== Number(editing.amount)){
+      const last = c2(m.total - amount * (m.n - 1));
+      if (last > 0) m.all.forEach((x, i) => { if (x.id === editing.id) return; const a = i === m.n - 1 ? last : amount; if (Number(x.amount) !== a) out.push({...x, amount: a, updatedAt: base.updatedAt}); });
+    }
   } else if (kind === "expense" && base.pay === "ผ่อนจ่าย" && !$("fPL").checked && Number($("fInstN").value) > 1){
     // Split into monthly installments so each month shows what is due.
     const n = Number($("fInstN").value), start = $("fInstStart").value || addMonths(ymOf(date), 1);
     const instId = "i" + Date.now().toString(36);
-    const per = Math.floor(amount / n * 100) / 100;
+    const per = instPer(amount, n, base.qty);
     for (let i = 0; i < n; i++){
       const ym = addMonths(start, i);
       const dim = new Date(Number(ym.slice(0,4)), Number(ym.slice(5,7)), 0).getDate();
