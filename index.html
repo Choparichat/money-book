@@ -325,6 +325,7 @@ details summary{cursor:pointer;font-weight:500}
 .inst-what li{padding:3px 0;border-bottom:1px solid var(--line)}
 .inst-what li:last-child{border-bottom:0}
 .inst-what li.tap{cursor:pointer}
+.inst-fix{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;display:grid;gap:6px}
 .inst-what li.tap:hover{color:var(--ink, inherit)}
 .inst-what li > span.n{float:right;margin-left:10px;color:var(--ink, inherit)}
 </style>
@@ -688,7 +689,11 @@ details summary{cursor:pointer;font-weight:500}
       <div class="field"><label for="fInstStart">งวดแรกจ่ายเดือน</label><input id="fInstStart" type="month"></div>
     </div>
     <div class="hint" id="instHint" hidden></div>
-    <label class="check" id="instAllRow" hidden><input type="checkbox" id="fInstAll" checked> ใช้ยอดนี้กับทุกงวดของรายการนี้ (งวดสุดท้ายรับเศษให้ ยอดรวมเท่าเดิม) <span class="hint" id="instAllHint"></span></label>
+    <div class="inst-fix" id="instAllRow" hidden>
+      <div class="field"><label for="fInstAmt" id="fInstAmtLabel">ยอดงวดนี้ (พิมพ์ตามใบแจ้งยอด TikTok)</label><input id="fInstAmt" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <label class="check"><input type="checkbox" id="fInstAll" checked> ใช้ยอดนี้กับทุกงวดของรายการนี้ (งวดสุดท้ายรับเศษให้ ยอดรวมเท่าเดิม)</label>
+      <div class="hint" id="instAllHint"></div>
+    </div>
     <div class="field"><label for="fMemo">หมายเหตุ</label><input id="fMemo" autocomplete="off" placeholder="เช่น ราคาจริง 489.99 แต่คนส่งเก็บรวม 904"></div>
     <div class="pl-row" id="plRow" hidden>
       <label class="check"><input type="checkbox" id="fPL"> 💳 จ่ายด้วย TikTok Pay Later (จ่ายเต็มรอบเดียว)</label>
@@ -3429,10 +3434,14 @@ function instMates(e){
 }
 function updateInstAll(){
   const m = instMates(editing); $("instAllRow").hidden = !m; if (!m) return;
+  if (document.activeElement !== $("fInstAmt")) $("fInstAmt").value = $("fAmount").value;
+  $("fInstAmtLabel").textContent = `ยอดงวด ${editing.inst} (พิมพ์ตามใบแจ้งยอด TikTok)`;
   const a = c2(parseFloat($("fAmount").value) || 0), last = c2(m.total - a * (m.n - 1));
   $("instAllHint").textContent = a > 0 && last > 0 ? `→ งวด 1-${m.n - 1} งวดละ ${fmt(a)} · งวด ${m.n} ${fmt(last)} · รวม ${fmt(m.total)}` : "";
 }
 $("fAmount").addEventListener("input", updateInstAll);
+// the installment's own box writes the amount at the top of the form too
+$("fInstAmt").addEventListener("input", () => { $("fAmount").value = $("fInstAmt").value; $("fAmount").dispatchEvent(new Event("input")); });
 function updateInstHint(){
   const show = !$("instRow").hidden;
   $("instHint").hidden = !show;
