@@ -1331,16 +1331,17 @@ function entryItem(e, inBill){
     if (e.kind !== "saving" && e.note && e.name) tags.push({cat: e.name});
     if (bizOf(e) !== PERSONAL && page !== "shop") tags.push(bizOf(e));
     if (e.qty) tags.push(`${e.qty}${e.unit ? " " + e.unit : ""}${e.unitPrice ? " × " + fmt(e.unitPrice) : ""}`);
-    if (e.shop && !inBill) tags.push(shopColor(e.shop) ? {shop: e.shop} : "จาก " + e.shop);
+    // ticked as TikTok Pay Later: bought at TikTok Shop unless another shop is set
+    const plt = e.kind === "expense" && plTagOf(e), shop = e.shop || (plt ? "TikTok Shop" : "");
+    if (shop && !inBill) tags.push(shopColor(shop) ? {shop} : "จาก " + shop);
     if (e.time) tags.push(`เวลา ${e.time} น.`);
     if (e.payer) tags.push("จาก " + e.payer);
     { const z = sizeOf(e); if (z){ const c = costPer(e); tags.push(`${z.size} ${z.unit}${c ? ` · ${c.base} ละ ${fmtC(c.per)}` : ""}`); } }
     if (e.itemDisc) tags.push(`ลดรายการ ${fmt(e.itemDisc)}`);
     if (e.disc) tags.push(`ลดท้ายบิล ${fmt(e.disc)}`);
-    // ticked as TikTok Pay Later: say so (with its due date) in place of a plain "cash" or missing payment
-    const plt = e.kind === "expense" && plTagOf(e);
+    // ...and paid with it: say so (with its due date) in place of whatever payment the row carries
     if (plt) tags.push({pl: `💳 TikTok Pay Later · ครบ ${thaiDate(plt[1].due).slice(0, 5)}${plPaid()[plt[1].due] ? " · จ่ายแล้ว" : ""}`});
-    if (payText(e) && !(plt && (!e.pay || e.pay === "เงินสด"))) tags.push((e.account && accColor(e.account)) || accColor(e.pay) ? {pay: e} : payText(e));
+    if (payText(e) && !plt) tags.push((e.account && accColor(e.account)) || accColor(e.pay) ? {pay: e} : payText(e));
     if (e.inst){ const b = e.instId && plInstBill(e); tags.push(b ? {pl: `งวด ${e.inst} · 💳 รวมในบิล TikTok ครบ ${thaiDate(b.due).slice(0, 5)}${plPaid()[b.due] ? " · จ่ายแล้ว" : ""}`} : "งวด " + e.inst); }
     if (e.kind === "saving") tags.push(e.side || "ซื้อ");
     if (e.src === "sheet") tags.push("ชีต");
@@ -2607,7 +2608,13 @@ function splitDues(total, n, first){
 function editPlan(id, f){ savePlans(payPlans().map(p => p.id === id ? f(JSON.parse(JSON.stringify(p))) : p)); }
 let planOpen = null;
 let ppDraft = null, ppForm = null; // filled from an entry's edit form: open the new-schedule form with its name and amount
-$("fPL").addEventListener("change", () => { $("plDueField").hidden = !$("fPL").checked; if ($("fPL").checked && !editing) $("fPLDue").value = plDefaultDue($("fDate").value || todayISO); });
+// a TikTok Pay Later purchase is paid with "ผ่อนจ่าย · TikTok Later" and bought at TikTok Shop (unless another shop is set)
+function plFormFill(){
+  if (kind !== "expense") return;
+  if ($("fPay").value !== "ผ่อนจ่าย" || !/tiktok/i.test(pickVal(pk.acc))){ fillPays("ผ่อนจ่าย"); $("fPay").dispatchEvent(new Event("change")); setPick(pk.acc, "TikTok Later"); }
+  if (!pickVal(pk.shop)) setPick(pk.shop, "TikTok Shop");
+}
+$("fPL").addEventListener("change", () => { $("plDueField").hidden = !$("fPL").checked; if ($("fPL").checked){ if (!editing) $("fPLDue").value = plDefaultDue($("fDate").value || todayISO); plFormFill(); } $("instRow").hidden = !($("fPay").value === "ผ่อนจ่าย" && !editing && !$("fPL").checked); });
 $("ppFromEntry").addEventListener("click", () => {
   const e = editing; if (!e) return;
   ppDraft = {label: [e.note || e.name, e.shop].filter(Boolean).join(" · "), total: e.amount};
@@ -3201,7 +3208,7 @@ function fillAcc(keep){
   $("fAccLabel").textContent = pay === "ผ่อนจ่าย" ? "ผ่อนกับ" : pay === "บัตรเครดิต" ? "บัตร" : kind === "income" ? "เข้าบัญชี" : "จากบัญชี";
   const used = freq(entries.filter(e => e.pay === pay), e => e.account);
   fillPick(pk.acc, [{values: withAll(used, pay === "โอน/สแกนจ่าย" ? accList() : DEF.acc[pay] || [])}], keep);
-  const inst = pay === "ผ่อนจ่าย" && !editing;
+  const inst = pay === "ผ่อนจ่าย" && !editing && !$("fPL").checked; // Pay Later is paid in one go, not split
   $("instRow").hidden = !inst;
   updateInstHint();
 }
@@ -3435,7 +3442,7 @@ function openForm(e){
   sheetMode(e);
   $("ppFromEntry").hidden = !(e && e.kind === "expense");
   $("plRow").hidden = kind !== "expense";
-  { const t = e && plTagOf(e); $("fPL").checked = !!t; $("fPLDue").value = t ? t[1].due : plDefaultDue($("fDate").value || todayISO); $("plDueField").hidden = !t; }
+  { const t = e && plTagOf(e); $("fPL").checked = !!t; $("fPLDue").value = t ? t[1].due : plDefaultDue($("fDate").value || todayISO); $("plDueField").hidden = !t; if (t) plFormFill(); }
   bill = []; billSlot = null; $("billDisc").value = ""; showBillUI();
   // an old entry with only a total (sheet rows): fill amount, unit, price and size from the last purchase right away,
   // since its shop and item are already picked and picking them again fires nothing
@@ -3559,7 +3566,7 @@ $("entryForm").addEventListener("submit", async ev => {
   const out = [];
   if (editing){
     out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {}), ...(editing.billId ? {billId: editing.billId} : {}), ...(editing.disc ? {disc: editing.disc} : {})});
-  } else if (kind === "expense" && base.pay === "ผ่อนจ่าย" && Number($("fInstN").value) > 1){
+  } else if (kind === "expense" && base.pay === "ผ่อนจ่าย" && !$("fPL").checked && Number($("fInstN").value) > 1){
     // Split into monthly installments so each month shows what is due.
     const n = Number($("fInstN").value), start = $("fInstStart").value || addMonths(ymOf(date), 1);
     const instId = "i" + Date.now().toString(36);
