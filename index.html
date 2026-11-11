@@ -2626,7 +2626,8 @@ function whatCell(k, list){
   d.open = instOpen.has(k);
   d.addEventListener("toggle", () => { if (d.open) instOpen.add(k); else instOpen.delete(k); });
   list.forEach(x => {
-    const li = el("li"); li.append(el("span", "", x.what), el("span", "n", fmt(x.amount)));
+    const li = el("li"), w = el("span", "", x.what); if (x.e && x.e.instId) w.append(el("span", "", ` · ${instFull(x.e)}`));
+    li.append(w, el("span", "n", fmt(x.amount)));
     if (x.e){ li.classList.add("tap"); li.title = "แตะเพื่อแก้ยอดงวดนี้"; li.addEventListener("click", () => openForm(x.e)); }
     ol.append(li);
   });
@@ -2952,7 +2953,18 @@ function plInstPaid(g, on){
   const keys = new Set(g.inst.map(d => d.plan.id + ":" + d.i));
   savePlans(payPlans().map(p => ({...p, dues: (p.dues || []).map((x, i) => keys.has(p.id + ":" + i) ? {...x, paid: on} : x)})));
 }
-const plInstRow = d => { const b = el(d.e ? "button" : "div", "pl-item"); if (d.e){ b.type = "button"; b.addEventListener("click", () => openForm(d.e)); } b.append(el("span", "", `${thaiDate(d.date)} · ผ่อน ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`), el("span", "", fmt(d.amount))); return b; };
+// the full price of what an installment pays off: all its installments added up, and how many pieces
+function instFull(e){
+  if (!e || !e.instId) return "";
+  const t = c2(allEntries.filter(x => x.instId === e.instId).reduce((a, x) => a + (Number(x.amount) || 0), 0)), q = Number(e.qty);
+  return `ราคาเต็ม ${fmt(t)}${q > 1 ? ` (${q}${e.unit ? " " + e.unit : " ชิ้น"})` : ""}`;
+}
+const plInstRow = d => {
+  const b = el(d.e ? "button" : "div", "pl-item"); if (d.e){ b.type = "button"; b.addEventListener("click", () => openForm(d.e)); }
+  const full = d.e ? instFull(d.e) : `ราคาเต็ม ${fmt(c2([...d.plan.dues].reduce((a, x) => a + (Number(x.amount) || 0), 0)))}`;
+  const t = el("span", "", `${thaiDate(d.date)} · ผ่อน ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`); t.append(el("span", "hint", ` · ${full}`));
+  b.append(t, el("span", "", fmt(d.amount))); return b;
+};
 function renderPayLater(){
   const box = $("oPL"), groups = plGroups(), paid = plPaid();
   $("plPanel").hidden = !groups.length; box.textContent = ""; if (!groups.length) return;
