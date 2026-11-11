@@ -1279,6 +1279,8 @@ async function billPayAll(was, now){
     // a new shop on one item is the shop of the whole bill
     await putShop(entries.filter(x => x.billId === was.billId && x.id !== was.id), now.shop || "");
   }
+  // ไทยช่วยไทย on one item is ไทยช่วยไทย for the whole bill
+  if (was.billId && was.kind === "expense" && now.pay === TCT && was.pay !== TCT){ await tctBillAll(was.billId, was.id, now.date || was.date); return; }
   if (!was.billId || was.kind !== "expense" || [TCT, "ผ่อนจ่าย"].includes(now.pay)) return;
   if ((now.pay || "") === (was.pay || "") && (now.account || "") === (was.account || "")) return;
   const sib = entries.filter(x => x.billId === was.billId && x.id !== was.id && x.pay !== TCT && !x.instId);
@@ -1290,6 +1292,47 @@ async function billPayAll(was, now){
   }
   const app = sib.filter(x => x.src !== "sheet").map(x => put({...x, updatedAt: new Date().toISOString()}));
   if (app.length) await store.save(app);
+}
+// An item turned ไทยช่วยไทย because its bill is. Many were typed in already at what we paid (1 × 20 but 8 baht):
+// those keep their amount and the rest of the price is the government's. Otherwise the amount is the full price.
+function tctMateSplit(x, used){
+  const amt = Number(x.amount) || 0, u = Number(x.unitPrice) || 0, n = Number(x.qty) || 0;
+  const full = [c2(u * (n || 1)), u].find(f => f > amt && Math.abs(c2(f * TCT_OURS) - amt) <= 0.01);
+  if (full) return {full, ours: amt, gov: c2(full - amt), same: true};
+  const sp = tctSplit(amt, used);
+  return {full: amt, ...sp, same: sp.ours === amt};
+}
+// the other items of the bill, not yet ไทยช่วยไทย; onlySame: just those whose amount stays as it is
+const tctBillOthers = (billId, skipId) => entries.filter(x => x.billId === billId && x.id !== skipId && x.kind === "expense" && !isTct(x) && !x.instId && x.pay !== "ผ่อนจ่าย");
+async function tctBillAll(billId, skipId, date, onlySame){
+  const mates = tctBillOthers(billId, skipId);
+  if (!mates.length) return 0;
+  let used = tctUsed(date, mates.map(x => x.id));
+  const list = [];
+  for (const x of mates){ const sp = tctMateSplit(x, used); if (onlySame && !(sp.same && sp.full > Number(x.amount))) continue; used = c2(used + sp.gov); list.push({e: x, ...sp}); }
+  if (!list.length) return 0;
+  const put = (e, ours, gov) => { const y = {...e, pay: TCT, amount: ours, tctGov: gov}; delete y.account; return y; };
+  const rows = list.filter(x => x.e.src === "sheet");
+  if (rows.length){
+    // the sheet row is not touched: the app keeps what we paid and the government's share beside it
+    const m = rows.reduce((m, {e, ours, gov}) => setSheetPay({...e, amount: sheetAmt(e)}, {...put(e, ours, gov), sheetAmount: sheetAmt(e)}, m), {...sheetPays()});
+    if (JSON.stringify(m) !== JSON.stringify(sheetPays())) store.setSetting("sheetPay", m);
+  }
+  const app = list.filter(x => x.e.src !== "sheet");
+  if (app.length){ await store.save(app.map(({e, ours, gov}) => { const y = put(e, ours, gov); delete y.tctGov; y.updatedAt = new Date().toISOString(); return y; })); }
+  setGov(Object.fromEntries(list.map(({e, gov}) => [e.id, gov])));
+  return list.length;
+}
+// bills from before this rule with ไทยช่วยไทย on only some items: the others follow, when that changes no amount
+let tctFillBusy = false; const tctFillTried = new Set();
+function fillBillTct(){
+  if (tctFillBusy) return;
+  const todo = [...new Map(entries.filter(isTct).filter(e => e.billId && !tctFillTried.has(e.billId)).map(e => [e.billId, e])).values()]
+    .filter(e => tctBillOthers(e.billId, e.id).some(x => tctMateSplit(x, 0).full > Number(x.amount)));
+  if (!todo.length) return;
+  todo.forEach(e => tctFillTried.add(e.billId));
+  tctFillBusy = true;
+  setTimeout(async () => { let n = 0; try { for (const e of todo) n += await tctBillAll(e.billId, e.id, e.date, true); } catch (err){ console.warn(err); } tctFillBusy = false; if (n) render(); }, 0);
 }
 /* ---------- group separate rows into one bill (tick, then merge) ---------- */
 let selMode = false, selIds = new Set();
@@ -1440,6 +1483,7 @@ $("dayAdd").addEventListener("click", () => { const d = dayOpen; openForm(null);
 function render(){
   sheetPayApply();
   fillBillShops();
+  fillBillTct();
   renderDay();
   selBar();
   $("periodLabel").textContent = periodLabel();
