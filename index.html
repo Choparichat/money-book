@@ -2207,7 +2207,7 @@ function renderShop(P){
   entryList($("mList"), L, "shop");
 }
 function renderCost(all, itemKey){
-  const by = new Map();
+  const by = new Map(); all = buys(all);
   for (const e of all){ const c = costPer(e); if (!c) continue; const k = (itemKey(e) || "ไม่ระบุ") + "|" + c.base; (by.get(k) || by.set(k, []).get(k)).push({e, ...c}); }
   const tb = $("mCost"); tb.textContent = "";
   if (!by.size){ const tr = el("tr"); const td = el("td", "empty", "ยังไม่มีวัตถุดิบที่ใส่ขนาด"); td.colSpan = 4; tr.append(td); tb.append(tr); return; }
@@ -2234,7 +2234,7 @@ function paidPer(e){
   return {unit: q > 0 ? a / q : a, u: e.unit || "", c};
 }
 function renderCompare(all, itemKey){
-  if (all) { cmpAll = all; cmpKey = itemKey; }
+  if (all) { cmpAll = buys(all); cmpKey = itemKey; }
   const q = thaiFold($("cmpSearch").value).trim().toLowerCase(), one = $("cmpOne").checked;
   const by = new Map();
   for (const e of cmpAll){
@@ -2433,20 +2433,22 @@ function renderItems(){
   if (!shown.length){ box.append(el("div", "empty", q ? "ไม่พบรายการที่ค้นหา" : `ยังไม่มีรายการในหมวด${cat} ของ ${bizLabel(itmBiz)}`)); return; }
   for (const v of shown){
     v.xs.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+    // installments count as one purchase at the full price
+    const bs = buys(v.xs).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
     const row = el("div", "itm-row"), h = el("div", "itm-h");
     const total = v.xs.reduce((a, e) => a + (Number(e.amount) || 0), 0);
     h.append(el("strong", "", v.name), el("span", "num", fmt(total)));
-    const shops = [...new Set(v.xs.map(e => e.shop).filter(Boolean))];
-    const z = sizeRaw(v.xs[0]), c = v.xs.map(costPer).find(Boolean);
+    const shops = [...new Set(bs.map(e => e.shop).filter(Boolean))];
+    const z = sizeRaw(bs[0]), c = bs.map(costPer).find(Boolean);
     // what one piece cost the last time (the price per piece typed, else the amount paid ÷ how many)
     const pieceOf = e => Number(e.unitPrice) > 0 ? Number(e.unitPrice) : Number(e.amount) > 0 ? Number(e.amount) / (Number(e.qty) > 0 ? Number(e.qty) : 1) : 0;
     const each = e => `${fmt(pieceOf(e))} บาท/${e.unit || "ชิ้น"}`;
     // bought from more than one store: each store's last price per piece, the cheapest marked
     // every item gets this line, one store or many; a store's name typed with other spacing counts as the same store
     const stKey = sh => String(sh || "").replace(/\s+/g, "").toLowerCase();
-    const byStore = [...new Map(v.xs.filter(e => e.shop && pieceOf(e) > 0).map(e => [stKey(e.shop), e]).reverse()).values()];
+    const byStore = [...new Map(bs.filter(e => e.shop && pieceOf(e) > 0).map(e => [stKey(e.shop), e]).reverse()).values()];
     const multi = byStore.length > 0;
-    const meta = [`ซื้อ ${v.xs.length} ครั้ง`, `ล่าสุด ${thaiDate(v.xs[0].date)}`, !multi && pieceOf(v.xs[0]) > 0 ? each(v.xs[0]) : "", z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", !multi && shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
+    const meta = [`ซื้อ ${bs.length} ครั้ง`, `ล่าสุด ${thaiDate(bs[0].date)}`, !multi && pieceOf(bs[0]) > 0 ? each(bs[0]) : "", z ? `ขนาด ${z.size} ${z.unit}` : "ยังไม่ใส่ขนาด", c ? `${fmtC(c.per)}/${c.base}` : "", !multi && shops.length ? shops.join(", ") : ""].filter(Boolean).join(" · ");
     const top = el("div", "itm-top"), info = el("div");
     top.append(itmPicBtn(v.name), info); row.append(top);
     info.append(h, el("div", "hint", meta));
@@ -2954,6 +2956,23 @@ function plInstPaid(g, on){
   const keys = new Set(g.inst.map(d => d.plan.id + ":" + d.i));
   savePlans(payPlans().map(p => ({...p, dues: (p.dues || []).map((x, i) => keys.has(p.id + ":" + i) ? {...x, paid: on} : x)})));
 }
+// Something bought on installments is one purchase, not one per month: what the price views see is a single entry with the
+// full price paid (all installments, after the coupon), its price per piece from that, on the day it was bought
+// (the day it was saved, read from its installment id, unless the first installment comes earlier)
+function buys(list){
+  const out = [], seen = new Set();
+  for (const e of list){
+    if (!e.instId){ out.push(e); continue; }
+    if (seen.has(e.instId)) continue; seen.add(e.instId);
+    const all = allEntries.filter(x => x.instId === e.instId), xs = all.length ? all : [e];
+    const k = x => Number(String(x.inst || "").split("/")[0]) || 0, first = xs.reduce((a, x) => k(x) < k(a) ? x : a, xs[0]);
+    const total = c2(xs.reduce((a, x) => a + (Number(x.amount) || 0), 0)), q = Number(first.qty);
+    const t = parseInt(String(e.instId).slice(1, 9), 36), saved = t > 1.5e12 && t < 4e12 ? new Date(t + 7 * 3600e3).toISOString().slice(0, 10) : "";
+    const date = [first.date, ...xs.map(x => x.date), saved].filter(Boolean).sort()[0];
+    out.push({...first, date, amount: total, ...(q > 0 ? {unitPrice: c2(total / q)} : {}), disc: 0, itemDisc: 0, instOf: xs.length});
+  }
+  return out;
+}
 // the full price of what an installment pays off: all its installments added up, and how many pieces
 function instFull(e){
   if (!e || !e.instId) return "";
@@ -3378,7 +3397,7 @@ $("fQty").addEventListener("input", () => { autoQty = false; });
 function fillFromLast(fromShop){
   const n = pickVal(pk.note);
   if (kind !== "expense" || !n) return;
-  const shop = pickVal(pk.shop), all = entries.filter(e => e.kind === "expense" && e.note === n && (!editing || e.id !== editing.id)).sort((a,b) => a.date < b.date ? 1 : -1);
+  const shop = pickVal(pk.shop), all = buys(entries.filter(e => e.kind === "expense" && e.note === n && (!editing || (e.id !== editing.id && !(editing.instId && e.instId === editing.instId))))).sort((a,b) => a.date < b.date ? 1 : -1);
   const atShop = shop ? all.filter(e => e.shop === shop) : [];
   // the price per unit paid: typed, else the total over the amount bought (rows that kept only a total)
   const priceOf = e => Number(e.unitPrice) > 0 ? Number(e.unitPrice) : Number(e.amount) > 0 ? Math.round((Number(e.amount) + (Number(e.disc) || 0) + (Number(e.itemDisc) || 0)) / (Number(e.qty) > 0 ? Number(e.qty) : 1) * 100) / 100 : 0;
@@ -3442,7 +3461,7 @@ function shopPriceHint(){
   const n = pickVal(pk.note); h.hidden = true; h.textContent = "";
   if (kind !== "expense" || !n) return;
   const by = new Map();
-  entries.filter(e => e.kind === "expense" && e.note === n && e.shop && Number(e.unitPrice || e.amount) > 0).sort((a, b) => a.date < b.date ? 1 : -1)
+  buys(entries.filter(e => e.kind === "expense" && e.note === n && e.shop && Number(e.unitPrice || e.amount) > 0)).sort((a, b) => a.date < b.date ? 1 : -1)
     .forEach(e => { if (!by.has(e.shop)) by.set(e.shop, e); });
   if (!by.size) return;
   // a shop picked: only its own last price; no shop yet: every shop's, to compare
