@@ -2639,7 +2639,9 @@ function renderInstallments(box){
   for (const g of plGroups()){
     (g.inst || []).forEach(d => merged.add(d.plan.id + ":" + d.i));
     if (paid[g.due]) continue;
-    add(g.due, g.total, `บิล TikTok Pay Later ${g.items.length} รายการ` + (g.inst || []).map(d => ` + ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`).join(""));
+    // one line for what was bought on Pay Later, one line per installment billed with it
+    if (g.items.length) add(g.due, c2(g.items.reduce((a, e) => a + (Number(e.amount) || 0), 0)), `บิล TikTok Pay Later ${g.items.length} รายการ`);
+    (g.inst || []).forEach(d => add(g.due, d.amount, `${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length} · TikTok Later`, d.e));
   }
   const tiktokDay = (date, acc) => /tiktok/i.test(acc || "") ? date.slice(0, 8) + "10" : date;
   entries.filter(e => e.instId && e.date > todayISO).forEach(e => {
@@ -2906,6 +2908,10 @@ function setPL(list, on, due){
   });
   if (JSON.stringify(m) !== JSON.stringify(plTags())) store.setSetting("payLater", m);
 }
+// that month's TikTok bill; from this month on, a month with only installments in it still gets one, due on the 10th
+const plMonth = (g, date) => [...g.values()].find(x => x.due.slice(0, 7) === date.slice(0, 7))
+  || (date.slice(0, 7) < todayISO.slice(0, 7) ? null : (v => (g.set(v.due, v), v))({due: date.slice(0, 8) + "10", items: [], total: 0}));
+const plCount = g => [g.items.length ? `${g.items.length} รายการ` : "", g.inst ? `ผ่อน ${g.inst.length} งวด` : ""].filter(Boolean).join(" + ");
 function plGroups(){
   const g = new Map();
   for (const [e, [, t]] of plIndex()){
@@ -2915,16 +2921,16 @@ function plGroups(){
   // TikTok bills one statement a month: an installment of a TikTok schedule due that month is part of that bill
   for (const d of planDues()){
     if (!/tiktok/i.test(d.plan.account || "")) continue;
-    const v = [...g.values()].find(x => x.due.slice(0, 7) === d.date.slice(0, 7)); if (!v) continue;
+    const v = plMonth(g, d.date); if (!v) continue;
     (v.inst = v.inst || []).push(d); v.total = c2(v.total + d.amount);
   }
   // installments recorded as entries (งวด 1/3 …) on a TikTok account, billed in the month they fall in
   const tagged = plIndex();
   for (const e of allEntries){
     if (e.kind !== "expense" || !e.instId || tagged.has(e) || !/tiktok/i.test((e.account || "") + " " + (e.pay || ""))) continue;
-    const v = [...g.values()].find(x => x.due.slice(0, 7) === e.date.slice(0, 7)); if (!v) continue;
+    const v = plMonth(g, e.date); if (!v) continue;
     const [k, n] = String(e.inst || "1/1").split("/").map(Number), amount = Number(e.amount) || 0;
-    (v.inst = v.inst || []).push({date: e.date, amount, i: (k || 1) - 1, plan: {id: "e:" + e.instId, label: e.note || e.name || "ผ่อน", dues: {length: n || 1}}});
+    (v.inst = v.inst || []).push({e, date: e.date, amount, i: (k || 1) - 1, plan: {id: "e:" + e.instId, label: e.note || e.name || "ผ่อน", dues: {length: n || 1}}});
     v.total = c2(v.total + amount);
   }
   return [...g.values()].sort((a, b) => a.due < b.due ? -1 : 1);
@@ -2946,7 +2952,7 @@ function plInstPaid(g, on){
   const keys = new Set(g.inst.map(d => d.plan.id + ":" + d.i));
   savePlans(payPlans().map(p => ({...p, dues: (p.dues || []).map((x, i) => keys.has(p.id + ":" + i) ? {...x, paid: on} : x)})));
 }
-const plInstRow = d => { const b = el("div", "pl-item"); b.append(el("span", "", `${thaiDate(d.date)} · ผ่อน ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`), el("span", "", fmt(d.amount))); return b; };
+const plInstRow = d => { const b = el(d.e ? "button" : "div", "pl-item"); if (d.e){ b.type = "button"; b.addEventListener("click", () => openForm(d.e)); } b.append(el("span", "", `${thaiDate(d.date)} · ผ่อน ${d.plan.label} งวด ${d.i + 1}/${d.plan.dues.length}`), el("span", "", fmt(d.amount))); return b; };
 function renderPayLater(){
   const box = $("oPL"), groups = plGroups(), paid = plPaid();
   $("plPanel").hidden = !groups.length; box.textContent = ""; if (!groups.length) return;
@@ -2956,7 +2962,7 @@ function renderPayLater(){
   groups.forEach(g => {
     const d = el("details", "pl-grp"), isPaid = !!paid[g.due]; d.open = !isPaid && g === groups.find(x => !paid[x.due]);
     const sm = el("summary");
-    sm.append(el("strong", !isPaid && g.due < todayISO ? "neg" : "", `${isPaid ? "✓ " : ""}ครบ ${thaiDate(g.due)}`), el("span", "hint", `${g.items.length} รายการ${g.inst ? ` + ผ่อน ${g.inst.length} งวด` : ""}`), el("span", "n", fmt(g.total)));
+    sm.append(el("strong", !isPaid && g.due < todayISO ? "neg" : "", `${isPaid ? "✓ " : ""}ครบ ${thaiDate(g.due)}`), el("span", "hint", plCount(g)), el("span", "n", fmt(g.total)));
     d.append(sm);
     g.items.sort((a, b) => a.date < b.date ? -1 : 1).forEach(e => {
       const b = el("button", "pl-item"); b.type = "button";
@@ -2992,7 +2998,7 @@ function renderPayAlert(){
   list.forEach(d => {
     const row = el("div", "fu-row"), late = d.date < todayISO;
     const o = el("div", "fu-open");
-    o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${d.pl.items.length} รายการ${d.pl.inst ? ` + ผ่อน ${d.pl.inst.length} งวด` : ""}` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
+    o.append(el("strong", late ? "neg" : "", `${fmt(d.amount)} บาท · ${late ? "เลยกำหนด " : ""}${thaiDate(d.date)}`), el("span", "hint", d.pl ? `TikTok Pay Later · ${plCount(d.pl)}` : `${d.plan.label}${d.plan.account ? " · " + d.plan.account : ""} · งวด ${d.i + 1}/${d.plan.dues.length}`));
     const ok = el("button", "btn sm", "จ่ายแล้ว"); ok.type = "button";
     ok.addEventListener("click", () => d.pl ? plPayForm(d.pl, row, null, "alert") : editPlan(d.plan.id, q => { q.dues[d.i].paid = true; return q; }));
     if (d.pl && plPaying?.due === d.date && plPaying.where === "alert") setTimeout(() => plPayForm(d.pl, row, null, "alert"));
