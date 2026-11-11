@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.itm-pic{flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-mv{width:auto;padding-right:28px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.itm-pic{flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -906,7 +906,7 @@ let curYM = todayISO.slice(0,7);
 let shopBiz = "Muan";
 const CMP = "\u0000cmp";
 // chips next to the shops that list every item of one category, to tidy up names typed differently
-const ITM_VIEWS = {"\u0000raw": ["ค่าวัตถุดิบ", "🥚 วัตถุดิบ", "ค่าบรรจุภัณฑ์"], "\u0000pkg": ["ค่าบรรจุภัณฑ์", "📦 บรรจุภัณฑ์", "ค่าวัตถุดิบ"]};
+const ITM_VIEWS = {"\u0000raw": ["ค่าวัตถุดิบ", "🥚 วัตถุดิบ"], "\u0000pkg": ["ค่าบรรจุภัณฑ์", "📦 บรรจุภัณฑ์"], "\u0000eqp": ["ค่าอุปกรณ์", "🔧 อุปกรณ์"]};
 const shopView = b => b === CMP || b in ITM_VIEWS;
 const listFilter = {income: "", expense: ""};
 const listLimit = {};
@@ -2393,7 +2393,7 @@ async function itmMove(list, cat, ask){
   itmBusy = false; render();
 }
 function renderItems(){
-  const [cat, label, other] = ITM_VIEWS[shopBiz];
+  const [cat, label] = ITM_VIEWS[shopBiz], others = Object.values(ITM_VIEWS).map(x => x[0]).filter(c => c !== cat);
   const shops = shopList();
   if (!shops.includes(itmBiz)) itmBiz = shops.includes("Muan") ? "Muan" : shops[0];
   $("itmTitle").textContent = `รายการ${label.replace(/^\S+\s/, "")} · ${bizLabel(itmBiz)}`;
@@ -2477,13 +2477,18 @@ function renderItems(){
     const editing = itmEdit && itmEdit.name === v.name;
     b("✎ แก้ชื่อ", () => { itmEdit = editing ? null : {name: v.name, to: v.name, fresh: true}; renderItems(); });
     sim.forEach(w => b(`รวมกับ “${w.name}”`, () => { itmEdit = {name: v.name, to: w.name, fresh: true}; renderItems(); }));
-    b(`ย้ายไปหมวด${other.replace(/^ค่า/, "")}`, async () => {
+    // move to another item category (วัตถุดิบ / บรรจุภัณฑ์ / อุปกรณ์)
+    const mv = el("select", "btn sm itm-mv"); mv.disabled = itmBusy; mv.setAttribute("aria-label", "ย้าย " + v.name + " ไปหมวดอื่น");
+    mv.append(opt("", "ย้ายไปหมวด…"), ...others.map(c => opt(c, c.replace(/^ค่า/, ""))));
+    mv.addEventListener("change", async () => {
+      const other = mv.value; if (!other) return;
       const L = v.xs.filter(e => e.name !== other);
-      if (!confirm(`ย้าย “${v.name}” ${L.length} รายการ ไปหมวด ${other} ใช่ไหม`)) return;
+      if (!confirm(`ย้าย “${v.name}” ${L.length} รายการ ไปหมวด ${other} ใช่ไหม`)){ mv.value = ""; return; }
       itmBusy = true; renderItems();
       try { await itmPatch(L, {name: other}); toast(`ย้าย “${v.name}” ไปหมวด ${other} แล้ว`); } catch (err){ toast(err.message, true); }
       itmBusy = false; render();
     });
+    acts.append(mv);
     b(itmOpen === v.name ? "ซ่อนรายการ" : "ดูรายการ", () => { itmOpen = itmOpen === v.name ? null : v.name; renderItems(); });
     info.append(acts);
     if (editing){
