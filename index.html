@@ -3775,7 +3775,7 @@ function putInBill(it){
   billSlot = null;
 }
 function showBillUI(){
-  const can = kind === "expense" && !editing && $("fPay").value !== "ผ่อนจ่าย";
+  const can = kind === "expense" && !editing;
   $("billAdd").hidden = !can;
   $("billBox").hidden = !can || !bill.length;
   // with a bill open the add button sits inside the bill box, next to ล้างบิล
@@ -3934,6 +3934,22 @@ $("billSave").addEventListener("click", async () => {
     tctShare(fulls, paid).forEach((x, i) => { out[i].amount = x.ours; govs[out[i].id] = x.gov; });
     tctManualBill = true;
   }
+  // bought on installments: each item is split on its own (per piece, like TikTok) into monthly installments;
+  // every month's installments of this order form a bill of their own
+  const nInst = Number($("fInstN").value);
+  if (shared.pay === "ผ่อนจ่าย" && !$("fPL").checked && nInst > 1 && !billEdit){
+    const start = $("fInstStart").value || addMonths(ymOf(date), 1), inst = [], t36 = Date.now().toString(36);
+    out.forEach((e, j) => {
+      const instId = "i" + t36 + j, per = instPer(e.amount, nInst, e.qty);
+      for (let i = 0; i < nInst; i++){
+        const ym = addMonths(start, i), dim = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+        const d = `${ym}-${pad(Math.min(Number(date.slice(8, 10)), dim))}`;
+        const x = {...e}; delete x.disc; // the order's coupon is already taken off the price split here
+        inst.push({...x, id: i ? store.newId() : e.id, date: d, ym, billId: billId + "-" + (i + 1), amount: i === nInst - 1 ? c2(e.amount - per * (nInst - 1)) : per, inst: `${i + 1}/${nInst}`, instId});
+      }
+    });
+    out.length = 0; out.push(...inst);
+  }
   $("billSave").disabled = true;
   try {
     await store.save(out);
@@ -3943,7 +3959,7 @@ $("billSave").addEventListener("click", async () => {
     if ($("fPL").checked) setPL(out.map(x => ({e: x})), true, $("fPLDue").value);
     if (oldIds.length) await store.remove(oldIds);
     if (billEdit){ bill = []; billSlot = null; billEdit = null; $("dlg").close(); return; }
-    toast(`บันทึกบิล ${out.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาทแล้ว`);
+    toast(`บันทึกบิล ${bill.length} รายการ ยอดจ่าย ${fmt(gross - disc)} บาท${out[0]?.instId ? ` แบ่ง ${nInst} งวดแล้ว` : "แล้ว"}`);
     bill = []; billSlot = null; $("billDisc").value = ""; ["fAmount", "fUnit", "fQty", "fItemDisc","fSize"].forEach(id => $(id).value = ""); $("sizeHint").hidden = true; itemGross = 0; $("itemDiscHint").hidden = true; fillNotes("");
     showBillUI();
   } catch (err){ toast("บันทึกไม่สำเร็จ: " + (err?.message || "ลองใหม่อีกครั้ง"), true); }
