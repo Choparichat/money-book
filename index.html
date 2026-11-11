@@ -3342,8 +3342,25 @@ function fillFromLast(fromShop){
 onPick(pk.note, () => {
   applyNoteCat(true);
   fillFromLast(false);
+  fillIncomeFromLast();
   shopPriceHint();
 });
+// income: the same detail as before starts from who paid and how it came in last time
+// (Line Man → paid by Line Man, into the same account); what was typed by hand is never replaced
+let payerByUser = false, payByUser = false, payerAuto = false;
+function fillIncomeFromLast(){
+  if (kind !== "income") return;
+  const n = pickVal(pk.note); if (!n) return;
+  const b = curBiz(), all = entries.filter(e => e.kind === "income" && (e.note || "").trim() === n && (!editing || e.id !== editing.id)).sort((a, z) => a.date < z.date ? 1 : -1);
+  const last = all.find(e => bizOf(e) === b) || all[0];
+  let py = (all.find(e => e.payer) || {}).payer;
+  // never paid by anyone yet: a payer with the same name as the detail (Line Man)
+  if (!py){ const k = norm(n); py = [...new Set(entries.filter(e => e.kind === "income" && e.payer).map(e => e.payer))].find(x => norm(x) === k); }
+  if (py && !payerByUser && (!pickVal(pk.payer) || payerAuto)){ setPick(pk.payer, py); payerAuto = true; }
+  if (last && last.pay && !editing && !payByUser && [...$("fPay").options].some(o => o.value === last.pay)){
+    $("fPay").value = last.pay; fillAcc(last.account || "");
+  }
+}
 // the last price paid for this item at each shop, under the item
 function shopPriceHint(){
   const h = $("shopPriceHint"); if (!h) return;
@@ -3363,8 +3380,8 @@ onPick(pk.unit); onPick(pk.shop, () => {
   // a different shop: its own last amount, unit, price and size for this item
   fillFromLast(true);
   shopPriceHint();
-}); onPick(pk.group); onPick(pk.acc); onPick(pk.payer);
-$("fPay").addEventListener("change", () => fillAcc(""));
+}); onPick(pk.group); onPick(pk.acc); onPick(pk.payer, () => { payerByUser = true; payerAuto = false; });
+$("fPay").addEventListener("change", ev => { if (ev.isTrusted) payByUser = true; fillAcc(""); });
 // fAmount is always what is paid for this item; the item discount comes off the full price.
 let itemGross = 0;
 const r2 = v => Math.round(v * 100) / 100;
@@ -3470,7 +3487,7 @@ function openForm(e){
   $("delBtn").hidden = !e; $("delAllBtn").hidden = !(e && (e.instId || e.billId));
   resetDelete();
   const k = e ? e.kind : ({income: "income", saving: "saving"}[page] || "expense");
-  $("entryForm").reset(); $("shopPriceHint").hidden = true; autoQty = false; amtLeads = false;
+  $("entryForm").reset(); $("shopPriceHint").hidden = true; autoQty = false; amtLeads = false; payerByUser = payByUser = payerAuto = false;
   itemGross = 0; $("itemDiscHint").hidden = true; $("sizeHint").hidden = true;
   setKind(k, true);
   if (e){
