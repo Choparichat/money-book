@@ -691,7 +691,8 @@ details summary{cursor:pointer;font-weight:500}
     <div class="hint" id="instHint" hidden></div>
     <div class="inst-fix" id="instAllRow" hidden>
       <div class="field"><label for="fInstAmt" id="fInstAmtLabel">ยอดงวดนี้ (พิมพ์ตามใบแจ้งยอด TikTok)</label><input id="fInstAmt" type="number" inputmode="decimal" step="0.01" min="0"></div>
-      <label class="check"><input type="checkbox" id="fInstAll" checked> ใช้ยอดนี้กับทุกงวดของรายการนี้ (งวดสุดท้ายรับเศษให้ ยอดรวมเท่าเดิม)</label>
+      <div class="field"><label for="fInstTotal">ราคาเต็ม (รวมทุกงวด) แก้ได้ถ้าแยกของบางอย่างออกไปเป็นรายการใหม่</label><input id="fInstTotal" type="number" inputmode="decimal" step="0.01" min="0"></div>
+      <label class="check"><input type="checkbox" id="fInstAll" checked> ใช้กับทุกงวดของรายการนี้ (ยอดงวด ราคาเต็ม รายละเอียด จำนวน · งวดสุดท้ายรับเศษให้)</label>
       <div class="hint" id="instAllHint"></div>
     </div>
     <div class="field"><label for="fMemo">หมายเหตุ</label><input id="fMemo" autocomplete="off" placeholder="เช่น ราคาจริง 489.99 แต่คนส่งเก็บรวม 904"></div>
@@ -3523,14 +3524,18 @@ function instMates(e){
   const n = nOf(e); if (all.length !== n || n < 2 || kOf(e) === n) return null;
   return {all: all.sort((a, b) => kOf(a) - kOf(b)), n, total: c2(all.reduce((a, x) => a + (Number(x.amount) || 0), 0))};
 }
+let instTotalFor = null;
+const instTotal = m => { const t = c2(parseFloat($("fInstTotal").value)); return t > 0 ? t : m.total; };
 function updateInstAll(){
   const m = instMates(editing); $("instAllRow").hidden = !m; if (!m) return;
   if (document.activeElement !== $("fInstAmt")) $("fInstAmt").value = $("fAmount").value;
   $("fInstAmtLabel").textContent = `ยอดงวด ${editing.inst} (พิมพ์ตามใบแจ้งยอด TikTok)`;
-  const a = c2(parseFloat($("fAmount").value) || 0), last = c2(m.total - a * (m.n - 1));
-  $("instAllHint").textContent = a > 0 && last > 0 ? `→ งวด 1-${m.n - 1} งวดละ ${fmt(a)} · งวด ${m.n} ${fmt(last)} · รวม ${fmt(m.total)}` : "";
+  if (!$("fInstTotal").value || instTotalFor !== editing.id){ $("fInstTotal").value = m.total; instTotalFor = editing.id; }
+  const tot = instTotal(m), a = c2(parseFloat($("fAmount").value) || 0), last = c2(tot - a * (m.n - 1));
+  $("instAllHint").textContent = a > 0 && last > 0 ? `→ งวด 1-${m.n - 1} งวดละ ${fmt(a)} · งวด ${m.n} ${fmt(last)} · รวม ${fmt(tot)}` : a > 0 ? "ยอดงวดนี้ × จำนวนงวด เกินราคาเต็ม" : "";
 }
 $("fAmount").addEventListener("input", updateInstAll);
+$("fInstTotal").addEventListener("input", updateInstAll);
 // the installment's own box writes the amount at the top of the form too
 $("fInstAmt").addEventListener("input", () => { $("fAmount").value = $("fInstAmt").value; $("fAmount").dispatchEvent(new Event("input")); });
 function updateInstHint(){
@@ -3712,9 +3717,17 @@ $("entryForm").addEventListener("submit", async ev => {
     out.push({...base, id: editing.id, ...(editing.instId ? {instId: editing.instId, inst: editing.inst} : {}), ...(editing.billId ? {billId: editing.billId} : {}), ...(editing.disc ? {disc: editing.disc} : {})});
     // a TikTok installment fixed to the statement: every installment but the last gets this amount, the last the rest
     const m = !$("instAllRow").hidden && $("fInstAll").checked && instMates(editing);
-    if (m && amount > 0 && amount !== Number(editing.amount)){
-      const last = c2(m.total - amount * (m.n - 1));
-      if (last > 0) m.all.forEach((x, i) => { if (x.id === editing.id) return; const a = i === m.n - 1 ? last : amount; if (Number(x.amount) !== a) out.push({...x, amount: a, updatedAt: base.updatedAt}); });
+    if (m && amount > 0){
+      const last = c2(instTotal(m) - amount * (m.n - 1));
+      if (last <= 0){ toast("ยอดงวดนี้ × จำนวนงวด เกินราคาเต็ม", true); return; }
+      // the item's details go to every installment too, so a renamed or split order reads the same each month
+      const same = {name: base.name, note: base.note}; ["qty", "unit", "unitPrice", "shop"].forEach(k => { same[k] = base[k]; });
+      m.all.forEach((x, i) => {
+        if (x.id === editing.id) return;
+        const y = {...x, ...same, amount: i === m.n - 1 ? last : amount, updatedAt: base.updatedAt};
+        Object.keys(y).forEach(k => y[k] === undefined && delete y[k]);
+        if (["amount", "name", "note", "qty", "unit", "unitPrice", "shop"].some(k => String(y[k] ?? "") !== String(x[k] ?? ""))) out.push(y);
+      });
     }
   } else if (kind === "expense" && base.pay === "ผ่อนจ่าย" && !$("fPL").checked && Number($("fInstN").value) > 1){
     // Split into monthly installments so each month shows what is due.
