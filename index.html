@@ -3190,6 +3190,13 @@ function makeCombo(p, placeholder){
     // matches that start with the text come first, otherwise keep the most-used order
     if (q) items.sort((a, b) => (norm(a.t).startsWith(q) ? 0 : 1) - (norm(b.t).startsWith(q) ? 0 : 1));
     const typed = ci.value.trim();
+    // names typed somewhere else before (a shop written in รายละเอียด): offer them too, so they are not typed again
+    if (q && p.extra){
+      const have = new Set(opts.map(o => norm(o.v)));
+      const ex = [...new Set(p.extra())].filter(v => v && !have.has(norm(v)) && norm(v).includes(q)).slice(0, 5);
+      ex.forEach(v => { have.add(norm(v)); items.push({add: v, t: `${v} · เคยพิมพ์ไว้ในรายละเอียด`}); });
+      opts.push(...ex.map(v => ({v, t: v})));
+    }
     if (typed && !all && !opts.some(o => norm(o.t) === norm(typed) || norm(o.v) === norm(typed))) (adding ? items.unshift.bind(items) : items.push.bind(items))({add: typed, t: `＋ เพิ่ม "${typed}"`});
     if (adding && !typed) items = [];
     // always offer a way to add, even before anything is typed
@@ -3254,6 +3261,8 @@ makeCombo(pk.name, "พิมพ์ค้นหา หรือพิมพ์�
 makeCombo(pk.shop, "พิมพ์ค้นหาร้าน หรือพิมพ์ชื่อร้านใหม่");
 makeCombo(pk.group, "พิมพ์ค้นหา หรือพิมพ์ชื่อกลุ่มใหม่");
 makeCombo(pk.biz, "พิมพ์ค้นหา หรือพิมพ์ชื่อร้าน/กิจการใหม่");
+// past details that look like a shop's name (rows that kept the shop in รายละเอียด, like KFC)
+pk.shop.extra = () => freq(entries.filter(e => e.kind === "expense" && !e.shop && e.note && e.note.length <= 30), e => e.note);
 makeCombo(pk.payer, "พิมพ์ค้นหา หรือพิมพ์ชื่อคนจ่ายใหม่");
 
 /* ---------- entry form ---------- */
