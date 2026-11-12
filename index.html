@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-mv{width:auto;padding-right:28px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.itm-pic{flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-mv{width:auto;padding-right:28px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.picnone{display:grid;place-items:center;height:180px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}.itm-pic{user-select:none;-webkit-user-select:none;flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -610,8 +610,9 @@ details summary{cursor:pointer;font-weight:500}
 <dialog id="picDlg" class="daydlg" aria-labelledby="picTitle">
   <div class="daybody">
     <div class="dhead"><h2 id="picTitle">รูป</h2><button class="x" type="button" id="picClose" aria-label="ปิด">×</button></div>
-    <img class="picbig" id="picBig" alt="">
-    <div class="itm-a"><button class="btn sm primary" type="button" id="picChange">📷 เปลี่ยนรูป</button><button class="btn sm" type="button" id="picDel">ลบรูป</button></div>
+    <img class="picbig" id="picBig" alt=""><div class="picnone" id="picNone">ยังไม่มีรูป</div>
+    <div class="itm-a"><button class="btn sm primary" type="button" id="picChange">📷 เปลี่ยนรูป</button><button class="btn sm" type="button" id="picPaste">📋 วางรูปที่ก๊อปไว้</button><button class="btn sm" type="button" id="picDel">ลบรูป</button></div>
+    <p class="hint" style="margin:0">ก๊อปรูปจากเว็บหรือแอปอื่นไว้ แล้วกด “วางรูปที่ก๊อปไว้” หรือกด Ctrl+V (Mac: ⌘+V)</p>
   </div>
 </dialog>
 <dialog id="dayDlg" class="daydlg" aria-labelledby="dayTitle">
@@ -2354,8 +2355,7 @@ async function shrinkPhoto(file, max = 320){
 }
 let itmPicFor = null;
 function itmPickPhoto(name){ itmPicFor = name; $("itmPicFile").value = ""; $("itmPicFile").click(); }
-$("itmPicFile").addEventListener("change", async ev => {
-  const f = ev.target.files[0], name = itmPicFor; ev.target.value = "";
+async function setPhoto(name, f){
   if (!f || !name) return;
   toast("กำลังย่อรูป…");
   try {
@@ -2364,10 +2364,34 @@ $("itmPicFile").addEventListener("change", async ev => {
     toast(`ใส่รูป “${name}” แล้ว`);
     if ($("picDlg").open) openPhoto(name);
   } catch (err){ toast(err.message || "ใส่รูปไม่สำเร็จ", true); }
+}
+$("itmPicFile").addEventListener("change", ev => { const f = ev.target.files[0]; ev.target.value = ""; setPhoto(itmPicFor, f); });
+// a picture copied elsewhere can be pasted: into the open photo box, or onto the item's photo square under the mouse
+let itmPicHover = null;
+document.addEventListener("paste", ev => {
+  if ($("dlg").open && !$("picDlg").open) return;
+  const name = $("picDlg").open ? itmPicFor : (document.activeElement && document.activeElement.dataset && document.activeElement.dataset.pic) || (!$("itmPanel").hidden && itmPicHover);
+  if (!name) return;
+  const it = [...(ev.clipboardData && ev.clipboardData.items || [])].find(x => x.kind === "file" && /^image\//.test(x.type));
+  if (!it){ if ($("picDlg").open) toast("ในคลิปบอร์ดไม่มีรูป ลองคลิกขวาที่รูปแล้วเลือก “คัดลอกรูปภาพ”", true); return; }
+  ev.preventDefault(); setPhoto(name, it.getAsFile());
+});
+$("picPaste").addEventListener("click", async () => {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.read) throw new Error("no");
+    for (const item of await navigator.clipboard.read()){
+      const t = item.types.find(x => /^image\//.test(x));
+      if (t){ await setPhoto(itmPicFor, await item.getType(t)); return; }
+    }
+    toast("ในคลิปบอร์ดไม่มีรูป ลองกดค้างที่รูปแล้วเลือก “คัดลอก” ก่อน", true);
+  } catch { toast("เบราว์เซอร์นี้ไม่ให้อ่านคลิปบอร์ด ลองกด Ctrl+V หรือบันทึกรูปลงเครื่องแล้วกด “เปลี่ยนรูป”", true); }
 });
 function openPhoto(name){
-  const p = itmPhoto(name); if (!p) return itmPickPhoto(name);
-  itmPicFor = name; $("picTitle").textContent = name; $("picBig").src = p.d; $("picBig").alt = "รูป " + name;
+  const p = itmPhoto(name);
+  itmPicFor = name; $("picTitle").textContent = name;
+  $("picBig").hidden = !p; $("picNone").hidden = !!p; $("picDel").hidden = !p;
+  $("picChange").textContent = p ? "📷 เปลี่ยนรูป" : "📷 ถ่าย / เลือกรูป";
+  if (p){ $("picBig").src = p.d; $("picBig").alt = "รูป " + name; }
   if (!$("picDlg").open) $("picDlg").showModal();
 }
 $("picClose").addEventListener("click", () => $("picDlg").close());
@@ -2380,7 +2404,9 @@ function itmPicBtn(name){
   const p = itmPhoto(name), b = el("button", "itm-pic" + (p ? " has" : "")); b.type = "button"; b.disabled = itmBusy;
   if (p){ const i = document.createElement("img"); i.src = p.d; i.alt = "รูป " + name; i.loading = "lazy"; b.append(i); b.setAttribute("aria-label", "ดูรูป " + name); }
   else { b.textContent = "📷\nใส่รูป"; b.style.whiteSpace = "pre"; b.setAttribute("aria-label", "ใส่รูป " + name); }
-  b.addEventListener("click", () => p ? openPhoto(name) : itmPickPhoto(name));
+  b.dataset.pic = name; b.title = p ? "ดูรูป" : "ใส่รูป: ถ่าย เลือก หรือวางรูปที่ก๊อปไว้ (ชี้แล้วกด Ctrl+V ได้)";
+  b.addEventListener("mouseenter", () => { itmPicHover = name; }); b.addEventListener("mouseleave", () => { if (itmPicHover === name) itmPicHover = null; });
+  b.addEventListener("click", () => openPhoto(name));
   return b;
 }
 async function itmMove(list, cat, ask){
