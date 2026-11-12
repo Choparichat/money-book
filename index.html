@@ -4444,7 +4444,9 @@ function initStore(){
   function sheetOp(orig, op){
     if (!cfg) throw new Error("ต้องเชื่อม Google Sheet ก่อน ถึงจะแก้รายการจากชีตได้");
     if ((ls.get("money-book-script", 0)) < 4 || !orig.row) throw new Error("ต้องวางสคริปต์ตัวใหม่ในชีตแล้ว Deploy เวอร์ชันใหม่ก่อน ถึงจะแก้รายการจากชีตได้");
-    enqueue({...op, tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: orig.amount, name: orig.name || "", note: orig.note || "", unitPrice: orig.unitPrice || "", qty: orig.qty || ""}});
+    // the sheet row holds the full amount; the app may show less for it (ไทยช่วยไทย: only our share), so the row is
+    // matched, and written, with the sheet's own amount, never the share shown
+    enqueue({...op, ...(op.entry ? {entry: {...op.entry, amount: sheetAmt(op.entry)}} : {}), tab: orig.tab, row: orig.row, kind: orig.kind, orig: {date: orig.date, amount: sheetAmt(orig), name: orig.name || "", note: orig.note || "", unitPrice: orig.unitPrice || "", qty: orig.qty || ""}});
   }
   // What was saved on this device, newest first, so a save that seems lost can be found again.
   const LOG = "money-book-log";
