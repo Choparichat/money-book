@@ -235,7 +235,7 @@ table{border-collapse:collapse;width:100%;font-size:.88rem}
 .scroll table.cost{min-width:0}
 table.cmp tr.ci td{background:var(--sunk);font-weight:600;border-bottom:0;padding-top:10px}
 table.cmp tr.best td{color:var(--inc)}table.cmp tr.best td:first-child{font-weight:600}
-table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-mv{width:auto;padding-right:28px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.picnone{display:grid;place-items:center;height:180px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}.itm-pic{user-select:none;-webkit-user-select:none;flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
+table.cmp td.sh{padding-left:16px}.cmp-one{display:flex;gap:6px;align-items:center;margin-bottom:4px}.srch .cmp-one input{width:auto}#shopChips{margin-bottom:10px}.from-st{font-size:15px;margin:14px 0 4px}.itm-row{display:grid;gap:4px;padding:8px 2px;border-bottom:1px solid var(--line)}.itm-h{display:flex;gap:8px;justify-content:space-between;align-items:baseline}.itm-h strong{overflow-wrap:anywhere}.itm-a{display:flex;gap:6px;flex-wrap:wrap}.itm-ed{display:flex;gap:6px;flex-wrap:wrap}.itm-ed input{flex:1 1 180px;min-width:0}.itm-sim{color:var(--exp)}.itm-row .list{margin-top:4px}.itm-mv{width:auto;padding-right:28px}.itm-low{color:var(--inc)}.itm-find{display:flex;gap:8px;margin:8px 0}.itm-find input{flex:1 1 auto;min-width:0}.itm-find select{flex:0 1 200px;min-width:0;width:auto}.itm-top{display:flex;gap:10px;align-items:flex-start}.itm-top>div{flex:1;min-width:0;display:grid;gap:4px;align-content:start}.itm-top .itm-a{margin-top:2px}.picnone{display:grid;place-items:center;height:180px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}.itm-pic{user-select:none;-webkit-user-select:none;flex:none;width:96px;height:96px;border-radius:12px;border:1px dashed var(--line);background:var(--sunk);color:var(--muted);font-size:.8rem;line-height:1.3;padding:0;cursor:pointer;overflow:hidden;display:grid;place-items:center;text-align:center}.itm-pic.has{border-style:solid}.itm-pic img{width:100%;height:100%;object-fit:cover;display:block}.itm-pic.has{background:#fff}@media(min-width:600px){.itm-pic{width:120px;height:120px}}.itm-pic:disabled{opacity:.5;cursor:wait}.picbig{width:100%;max-height:60dvh;object-fit:contain;border-radius:10px;background:var(--sunk)}table.cost td.n{white-space:nowrap}table.cost .hint{font-size:.74rem}
 th{font-weight:500;color:var(--muted);text-align:left;font-size:.76rem;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 td{padding:6px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -493,6 +493,15 @@ details summary{cursor:pointer;font-weight:500}
         <thead><tr><th>ร้าน</th><th class="n">ราคาล่าสุด</th><th class="n">เทียบ</th></tr></thead>
         <tbody id="mCmp"></tbody>
       </table></div>
+    </div>
+    <div class="panel srch" id="fromPanel" hidden>
+      <h2>รายการซื้อของ ตามร้านที่ซื้อ</h2>
+      <div class="hint">ทุกแถวที่ใส่ร้านที่ซื้อไว้ (ในชีตคือคอลัมน์ถัดจาก “จำนวนชิ้น”) ไม่ว่าจะอยู่หมวดไหน เรียงตามร้าน แล้วตามชื่อ ชื่อที่พิมพ์ต่างกันนิดเดียวจะอยู่ใกล้กัน กด “แก้ชื่อ” หรือ “รวมกับ…” เพื่อให้ชื่อตรงกัน</div>
+      <div class="hint" id="fromScript" hidden></div>
+      <div class="chips" id="fromStores" style="margin-top:8px"></div>
+      <div class="itm-find"><input type="search" id="fromSearch" placeholder="🔍 ค้นหาชื่อรายการ" aria-label="ค้นหาชื่อรายการที่ซื้อจากร้าน" autocomplete="off"></div>
+      <div class="hint" id="fromCount"></div>
+      <div id="fromList"></div>
     </div>
     <div class="panel srch" id="itmPanel" hidden>
       <h2 id="itmTitle">รายการวัตถุดิบ</h2>
@@ -908,7 +917,9 @@ let shopBiz = "Muan";
 const CMP = "\u0000cmp";
 // chips next to the shops that list every item of one category, to tidy up names typed differently
 const ITM_VIEWS = {"\u0000raw": ["ค่าวัตถุดิบ", "🥚 วัตถุดิบ"], "\u0000pkg": ["ค่าบรรจุภัณฑ์", "📦 บรรจุภัณฑ์"], "\u0000eqp": ["ค่าอุปกรณ์", "🔧 อุปกรณ์"]};
-const shopView = b => b === CMP || b in ITM_VIEWS;
+// chip that lists every purchase with a store it was bought from (the sheet's column after จำนวนชิ้น), store by store
+const FROM = "\u0000from";
+const shopView = b => b === CMP || b === FROM || b in ITM_VIEWS;
 const listFilter = {income: "", expense: ""};
 const listLimit = {};
 
@@ -1439,9 +1450,11 @@ const sheetAmt = e => e.sheetAmount != null ? e.sheetAmount : Number(e.amount);
 const sheetSame = (x, t) => plSame({...x, amount: sheetAmt(x)}, t);
 function sheetPayPut(e, t){
   if (e.sheetAmount == null) e.sheetAmount = Number(e.amount);
+  // the store typed in the sheet's own column stays when the app's note about the row keeps none
+  if (e.sheetShop == null) e.sheetShop = e.shop || "";
   if (t.pay === TCT && t.ours != null){ e.amount = t.ours; e.tctGov = t.gov; } else { e.amount = e.sheetAmount; delete e.tctGov; }
   if (t.pay) e.pay = t.pay; if (t.account) e.account = t.account; else delete e.account;
-  SHEET_EXTRA.forEach(k => { if (k in t){ if (t[k]) e[k] = t[k]; else delete e[k]; } });
+  SHEET_EXTRA.forEach(k => { if (k in t){ if (t[k]) e[k] = t[k]; else if (k === "shop" && e.sheetShop) e.shop = e.sheetShop; else delete e[k]; } });
 }
 function sheetPayApply(){
   const m = sheetPays(), used = new Set(), rest = [];
@@ -2156,12 +2169,13 @@ function renderShop(P){
   const shops = shopList();
   if (!shops.includes(shopBiz) && !shopView(shopBiz)) shopBiz = shops[0];
   const box = $("shopChips"); box.textContent = "";
-  [...shops, ...Object.keys(ITM_VIEWS), CMP].forEach(b => { const c = el("button", "chip", b === CMP ? "⚖ เทียบราคา" : b in ITM_VIEWS ? ITM_VIEWS[b][1] : bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
+  [...shops, FROM, ...Object.keys(ITM_VIEWS), CMP].forEach(b => { const c = el("button", "chip", b === CMP ? "⚖ เทียบราคา" : b === FROM ? "🏪 ร้านที่ซื้อ" : b in ITM_VIEWS ? ITM_VIEWS[b][1] : bizLabel(b)); c.type = "button"; c.setAttribute("aria-pressed", String(b === shopBiz)); c.addEventListener("click", () => { shopBiz = b; render(); }); box.append(c); });
   document.querySelector('#tabs [data-page="shop"]').textContent = "Muan";
   // the เทียบราคา chip swaps the page for the price comparison, over every shop's purchases
-  const cmp = shopBiz === CMP, itm = shopBiz in ITM_VIEWS, want = cmp ? "cmpPanel" : itm ? "itmPanel" : "";
-  for (const x of $("page-shop").children) if (x !== box) x.hidden = want ? x.id !== want : x.id === "cmpPanel" || x.id === "itmPanel";
+  const cmp = shopBiz === CMP, itm = shopBiz in ITM_VIEWS, frm = shopBiz === FROM, want = cmp ? "cmpPanel" : itm ? "itmPanel" : frm ? "fromPanel" : "";
+  for (const x of $("page-shop").children) if (x !== box) x.hidden = want ? x.id !== want : ["cmpPanel", "itmPanel", "fromPanel"].includes(x.id);
   if (itm){ renderItems(); return; }
+  if (frm){ renderFrom(); return; }
   if (cmp){ renderCompare(entries.filter(e => bizOf(e) !== PERSONAL && e.kind === "expense"), e => (e.note || e.name || "").trim()); return; }
   const L = P.filter(e => bizOf(e) === shopBiz), all = entries.filter(e => bizOf(e) === shopBiz && e.kind === "expense");
   const s = sums(L);
@@ -2320,8 +2334,8 @@ async function itmPatch(list, patch){
   if (app.length) await store.save(app.map(e => ({...e, ...patch, updatedAt: now})));
   for (const e of rows) await store.sheetEdit(e, {...e, ...patch});
 }
-async function itmRename(from, to){
-  const list = itmPool().filter(e => itmKey(e) === from);
+async function itmRename(from, to, pool = itmPool()){
+  const list = pool.filter(e => itmKey(e) === from);
   if (!list.length || from === to) return 0;
   // what the app remembers per item name goes with it, unless the new name already has its own
   const sz = settings.itemSizes || {};
@@ -2332,7 +2346,7 @@ async function itmRename(from, to){
   if (nc && nc[from] && !nc[to]) store.setSetting("noteCats", {...nc, [to]: nc[from]});
   const ph = itmPhoto(from);
   // the photo goes with the name; the old name keeps it while another shop still uses that name
-  const elsewhere = entries.some(e => e.kind === "expense" && bizOf(e) !== itmBiz && itmKey(e) === from);
+  const elsewhere = entries.some(e => e.kind === "expense" && !list.includes(e) && itmKey(e) === from);
   if (ph){ if (!itmPhoto(to)) store.setSetting(itmPicKey(to), ph); if (!elsewhere) store.setSetting(itmPicKey(from), null); }
   await itmPatch(list, {note: to});
   return list.length;
@@ -2543,6 +2557,84 @@ function renderItems(){
   }
 }
 $("cmpOne").addEventListener("change", () => renderCompare());
+
+/* ---------- every purchase with the store it was bought from, store by store: tidy names before anything else ---------- */
+let fromStore = "", fromEdit = null, fromOpen = null;
+const fromPool = () => entries.filter(e => e.kind === "expense" && (e.shop || "").trim() && (bizOf(e) !== PERSONAL || e.src === "sheet"));
+const fromStoreKey = sh => String(sh || "").replace(/\s+/g, " ").trim();
+function renderFrom(){
+  const pool = fromPool(), cnt = new Map();
+  pool.forEach(e => { const k = fromStoreKey(e.shop); cnt.set(k, (cnt.get(k) || 0) + 1); });
+  const stores = [...cnt.keys()].sort((a, b) => cnt.get(b) - cnt.get(a) || a.localeCompare(b, "th"));
+  if (fromStore && !cnt.has(fromStore)) fromStore = "";
+  let ver = 0; try { ver = Number(JSON.parse(localStorage.getItem("money-book-script"))) || 0; } catch {}
+  const sc = $("fromScript"); sc.hidden = !(ver && ver < 8);
+  sc.textContent = "ร้านที่พิมพ์ไว้ในชีตจะขึ้นที่นี่เมื่ออัปเดตสคริปต์ในชีตเป็นรุ่น 8 (ตอนนี้รุ่น " + ver + ")";
+  const sb = $("fromStores"); sb.textContent = "";
+  ["", ...stores].forEach(k => {
+    const c = el("button", "chip", k ? `${k} (${cnt.get(k)})` : `ทุกร้าน (${pool.length})`); c.type = "button"; c.setAttribute("aria-pressed", String(k === fromStore));
+    c.addEventListener("click", () => { fromStore = k; fromEdit = null; fromOpen = null; renderFrom(); });
+    sb.append(c);
+  });
+  const box = $("fromList"); box.textContent = "";
+  if (!pool.length){ $("fromCount").textContent = ""; box.append(el("div", "empty", "ยังไม่มีรายการที่ใส่ร้านที่ซื้อ")); return; }
+  // one name across every store: renaming or merging changes it wherever it was bought
+  const by = new Map();
+  for (const e of pool){ const k = itmKey(e); if (!k) continue; (by.get(k) || by.set(k, {name: k, xs: []}).get(k)).xs.push(e); }
+  const all = [...by.values()];
+  const dl = $("itmNames"); dl.textContent = "";
+  all.map(v => v.name).sort((a, b) => a.localeCompare(b, "th")).forEach(n => dl.append(opt(n, n)));
+  const q = thaiFold($("fromSearch").value).trim().toLowerCase();
+  const hit = v => !q || thaiFold(v.name).toLowerCase().includes(q);
+  const groups = (fromStore ? [fromStore] : stores).map(st => [st, all.filter(v => hit(v) && v.xs.some(e => fromStoreKey(e.shop) === st)).sort((a, b) => a.name.localeCompare(b.name, "th"))]).filter(g => g[1].length);
+  const nNames = new Set(groups.flatMap(g => g[1].map(v => v.name))).size;
+  $("fromCount").textContent = `${nNames} ชื่อ จาก ${fromStore ? 1 : groups.length} ร้าน`;
+  if (!groups.length){ box.append(el("div", "empty", "ไม่พบรายการที่ค้นหา")); return; }
+  for (const [st, vs] of groups){
+    if (!fromStore) box.append(el("h3", "from-st", `🏪 ${st}`));
+    for (const v of vs){
+      const xs = v.xs.filter(e => fromStoreKey(e.shop) === st).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+      const id = st + "\u0000" + v.name, row = el("div", "itm-row"), h = el("div", "itm-h");
+      h.append(el("strong", "", v.name), el("span", "num", fmt(xs.reduce((a, e) => a + (Number(e.amount) || 0), 0))));
+      const last = xs[0], each = Number(last.unitPrice) > 0 ? Number(last.unitPrice) : (Number(last.amount) || 0) / (Number(last.qty) > 0 ? Number(last.qty) : 1);
+      const cats = [...new Set(xs.map(e => e.name || "ไม่ระบุหมวด"))].join(", ");
+      const other = v.xs.length - xs.length;
+      row.append(h, el("div", "hint", [`ซื้อ ${xs.length} ครั้ง`, `ล่าสุด ${thaiDate(last.date)}`, `${fmt(each)} บาท/${last.unit || "ชิ้น"}`, `หมวด ${cats}`, other ? `ร้านอื่นอีก ${other} ครั้ง` : ""].filter(Boolean).join(" · ")));
+      const n0 = itmNorm(v.name);
+      const sim = all.filter(w => w !== v && (() => { const n1 = itmNorm(w.name); return n1 === n0 || (Math.min(n0.length, n1.length) >= 3 && (n1.includes(n0) || n0.includes(n1))); })()).slice(0, 3);
+      const acts = el("div", "itm-a");
+      const b = (t, f) => { const x = el("button", "btn sm", t); x.type = "button"; x.disabled = itmBusy; x.addEventListener("click", f); acts.append(x); };
+      const editing = fromEdit && fromEdit.id === id;
+      b("✎ แก้ชื่อ", () => { fromEdit = editing ? null : {id, name: v.name, to: v.name, fresh: true}; renderFrom(); });
+      sim.forEach(w => b(`รวมกับ “${w.name}”`, () => { fromEdit = {id, name: v.name, to: w.name, fresh: true}; renderFrom(); }));
+      b(fromOpen === id ? "ซ่อนรายการ" : "ดูรายการ", () => { fromOpen = fromOpen === id ? null : id; renderFrom(); });
+      row.append(acts);
+      if (editing){
+        const f = el("div", "itm-ed"), inp = document.createElement("input");
+        inp.value = fromEdit.to; inp.setAttribute("list", "itmNames"); inp.setAttribute("aria-label", "ชื่อใหม่ของ " + v.name);
+        inp.addEventListener("input", () => { fromEdit.to = inp.value; });
+        const ok = el("button", "btn sm primary", "บันทึกชื่อ"), no = el("button", "btn sm", "ยกเลิก"); ok.type = no.type = "button";
+        const go = async () => {
+          const to = inp.value.trim().replace(/\s+/g, " ");
+          if (!to){ inp.focus(); return; }
+          if (to === v.name){ fromEdit = null; renderFrom(); return; }
+          const into = by.get(to);
+          if (!confirm(into ? `รวม “${v.name}” ${v.xs.length} รายการ เข้ากับ “${to}” (มีอยู่แล้ว ${into.xs.length} รายการ) ใช่ไหม` : `เปลี่ยนชื่อ “${v.name}” เป็น “${to}” ทั้ง ${v.xs.length} รายการ ใช่ไหม`)) return;
+          itmBusy = true; fromEdit = null; renderFrom();
+          try { const n = await itmRename(v.name, to, pool); toast(`${into ? "รวม" : "เปลี่ยนชื่อ"} ${n} รายการเป็น “${to}” แล้ว`); } catch (err){ toast(err.message, true); }
+          itmBusy = false; render();
+        };
+        ok.addEventListener("click", go); no.addEventListener("click", () => { fromEdit = null; renderFrom(); });
+        inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go(); } });
+        f.append(inp, ok, no); row.append(f);
+        if (fromEdit.fresh){ fromEdit.fresh = false; setTimeout(() => inp.focus(), 0); }
+      }
+      if (fromOpen === id){ const lb = el("div", "list"); entryList(lb, xs, "from"); row.append(lb); }
+      box.append(row);
+    }
+  }
+}
+$("fromSearch").addEventListener("input", () => renderFrom());
 
 
 /* ---------- funds (saving goals) ---------- */
