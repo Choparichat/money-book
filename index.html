@@ -2890,7 +2890,10 @@ function renderPayPlans(box){
 /* ---------- my accounts and transfers between them ---------- */
 // Which account money came in to or went out of, for the period on screen. Only bank/app transfers and cash
 // carry an account; rows typed in the sheet have none and are counted under "ไม่ระบุ".
-const accFlowKey = e => e.pay === "เงินสด" ? "เงินสด" : e.account || "ไม่ระบุ";
+// Cash used for a shop (Muan …) is kept apart from personal cash: "เงินสดร้าน Muan"
+const cashKey = biz => biz && biz !== PERSONAL ? "เงินสดร้าน " + biz.replace(/^ร้าน/, "") : "เงินสด";
+const cashKeys = () => [...new Set(["เงินสด", ...DEF.biz.map(cashKey), ...allEntries.filter(e => e.pay === "เงินสด").map(e => cashKey(bizOf(e)))])];
+const accFlowKey = e => e.pay === "เงินสด" ? cashKey(bizOf(e)) : e.account || "ไม่ระบุ";
 const accFlowIn = e => ["income", "expense", "saving"].includes(e.kind) && !(e.pay && !["โอน/สแกนจ่าย", "เงินสด"].includes(e.pay));
 let accOpen = ""; // the account row tapped open under the table
 function accFlows(P){
@@ -2902,7 +2905,7 @@ function accFlows(P){
     if (e.kind === "income" || (e.kind === "saving" && e.side === "ขาย")) add(k, a, 0); else add(k, 0, a);
   }
   for (const t of transfers.filter(inPeriod)){ const a = Number(t.amount) || 0; add(t.account || "ไม่ระบุ", 0, a); add(t.group || "ไม่ระบุ", a, 0); }
-  const order = [...accList(), "เงินสด"];
+  const order = [...accList(), ...cashKeys()];
   return [...m.entries()].sort((a, b) => { const i = order.indexOf(a[0]), j = order.indexOf(b[0]); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j) || (a[0] === "ไม่ระบุ") - (b[0] === "ไม่ระบุ"); });
 }
 // Money left in each account now. The person types the real balance once (settings.accBal[name] = {amt, date, at});
@@ -2913,7 +2916,7 @@ const accBals = () => settings.accBal || {};
 const madeAt = e => /^e[0-9a-z]+$/.test(e.id || "") && e.id.length > 6 ? parseInt(e.id.slice(1, -5), 36) : 0;
 function accBalances(){
   const B = accBals(), m = new Map();
-  [...accList(), "เงินสด", ...Object.keys(B)].forEach(n => { if (!m.has(n)) m.set(n, {bal: B[n] ? c2(Number(B[n].amt) || 0) : 0, set: B[n], n: 0}); });
+  [...accList(), ...cashKeys(), ...Object.keys(B)].forEach(n => { if (!m.has(n)) m.set(n, {bal: B[n] ? c2(Number(B[n].amt) || 0) : 0, set: B[n], n: 0}); });
   const add = (k, a, e) => {
     const v = m.get(k); if (!v || !e.date || e.date > todayISO) return;
     if (v.set && (e.date < v.set.date || (e.date === v.set.date && !(madeAt(e) > (v.set.at || 0))))) return;
@@ -2925,7 +2928,7 @@ function accBalances(){
     add(accFlowKey(e), e.kind === "income" || (e.kind === "saving" && e.side === "ขาย") ? a : -a, e);
   }
   for (const t of transfers){ const a = Number(t.amount) || 0; if (t.account) add(t.account, -a, t); if (t.group) add(t.group, a, t); }
-  return [...m.entries()].filter(([k, v]) => k !== "เงินสด" || v.set || v.n);
+  return [...m.entries()].filter(([k, v]) => accList().includes(k) || v.set || v.n);
 }
 let balEdit = ""; // the account whose balance is being typed
 function renderBalances(box){
@@ -3019,7 +3022,7 @@ function renderAccPanel(P){
   const btn = el("button", "btn sm", "⇄ โอนระหว่างบัญชี"); btn.type = "button";
   const f = el("div", "pp-form"); f.hidden = !trOpen;
   const fld = (label, inp) => { const d = el("div", "field"); d.append(el("label", "", label), inp); return d; };
-  const sel = keep => { const s = el("select"); accList().forEach(a => s.append(opt(a, a))); if (keep) s.value = keep; return s; };
+  const sel = keep => { const s = el("select"); [...accList(), ...cashKeys().filter(c => !accList().includes(c))].forEach(a => s.append(opt(a, a))); if (keep) s.value = keep; return s; };
   const from = sel(accList()[1] || accList()[0]), to = sel(accList()[2] || accList()[0]);
   const amt = el("input"); amt.type = "number"; amt.step = "0.01"; amt.inputMode = "decimal"; amt.placeholder = "0.00";
   const date = el("input"); date.type = "date"; date.value = dayPick || todayISO;
