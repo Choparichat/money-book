@@ -1562,6 +1562,7 @@ const accList = () => Array.isArray(settings.accounts) && settings.accounts.leng
 async function renameAccount(from, to){
   const S = settings, set = (k, v) => { if (JSON.stringify(v) !== JSON.stringify(S[k])) store.setSetting(k, v); };
   set("accounts", accList().map(a => a === from ? to : a));
+  if ((S.accBal || {})[from]){ const b = {...S.accBal}; b[to] = b[from]; delete b[from]; set("accBal", b); }
   if ((S.accColors || {})[from]){ const c = {...S.accColors}; c[to] = c[from]; delete c[from]; set("accColors", c); }
   const sp = {...sheetPays()}; let ch = false;
   for (const [id, t] of Object.entries(sp)) if (t.account === from){ sp[id] = {...t, account: to}; ch = true; }
@@ -2904,9 +2905,81 @@ function accFlows(P){
   const order = [...accList(), "เงินสด"];
   return [...m.entries()].sort((a, b) => { const i = order.indexOf(a[0]), j = order.indexOf(b[0]); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j) || (a[0] === "ไม่ระบุ") - (b[0] === "ไม่ระบุ"); });
 }
+// Money left in each account now. The person types the real balance once (settings.accBal[name] = {amt, date, at});
+// after that the app adds what came in and takes off what went out, counting every entry and transfer
+// dated after that day, plus the ones of that same day that were recorded after the balance was typed
+// (an app entry's id carries the time it was made). Without a set balance it counts from 0.
+const accBals = () => settings.accBal || {};
+const madeAt = e => /^e[0-9a-z]+$/.test(e.id || "") && e.id.length > 6 ? parseInt(e.id.slice(1, -5), 36) : 0;
+function accBalances(){
+  const B = accBals(), m = new Map();
+  [...accList(), "เงินสด", ...Object.keys(B)].forEach(n => { if (!m.has(n)) m.set(n, {bal: B[n] ? c2(Number(B[n].amt) || 0) : 0, set: B[n], n: 0}); });
+  const add = (k, a, e) => {
+    const v = m.get(k); if (!v || !e.date || e.date > todayISO) return;
+    if (v.set && (e.date < v.set.date || (e.date === v.set.date && !(madeAt(e) > (v.set.at || 0))))) return;
+    v.bal = c2(v.bal + a); v.n++;
+  };
+  for (const e of entries){
+    if (!accFlowIn(e)) continue;
+    const a = Number(e.amount) || 0;
+    add(accFlowKey(e), e.kind === "income" || (e.kind === "saving" && e.side === "ขาย") ? a : -a, e);
+  }
+  for (const t of transfers){ const a = Number(t.amount) || 0; if (t.account) add(t.account, -a, t); if (t.group) add(t.group, a, t); }
+  return [...m.entries()].filter(([k, v]) => k !== "เงินสด" || v.set || v.n);
+}
+let balEdit = ""; // the account whose balance is being typed
+function renderBalances(box){
+  const rows = accBalances();
+  box.append(el("div", "cc-h", "เงินคงเหลือตอนนี้"));
+  const t = el("table"), tb = el("tbody");
+  let total = 0;
+  rows.forEach(([k, v]) => {
+    total = c2(total + v.bal);
+    const tr = el("tr"), td = el("td"), set = el("button", "btn sm", v.set ? "แก้ยอด" : "ตั้งยอด"); set.type = "button";
+    set.setAttribute("aria-label", (v.set ? "แก้ยอดเงินของ " : "ตั้งยอดเงินของ ") + k);
+    set.addEventListener("click", () => { balEdit = balEdit === k ? "" : k; render(); });
+    td.append(accChip(k));
+    const sub = v.set ? `ตั้งไว้ ${fmt(v.set.amt)} เมื่อ ${thaiDate(v.set.date)}${v.n ? ` · หลังจากนั้น ${v.n} รายการ` : ""}` : "ยังไม่ได้ตั้งยอด นับจาก 0";
+    td.append(el("div", "hint", sub));
+    const amt = el("td", "n" + (v.bal < 0 ? " neg" : "")); amt.append(el("strong", "", (v.bal < 0 ? "−" : "") + fmt(Math.abs(v.bal)) + " บาท"));
+    const bt = el("td", "n"); bt.append(set);
+    tr.append(td, amt, bt); tb.append(tr);
+    if (balEdit === k){
+      const fr = el("tr"), fc = el("td"); fc.colSpan = 3;
+      const f = el("div", "pp-form");
+      const inp = el("input"); inp.type = "number"; inp.step = "0.01"; inp.inputMode = "decimal"; inp.placeholder = "0.00"; inp.value = v.bal ? String(v.bal) : "";
+      inp.setAttribute("aria-label", "ยอดเงินจริงใน " + k + " ตอนนี้");
+      const ok = el("button", "btn sm primary", "บันทึกยอด"); ok.type = "button";
+      const save = () => {
+        const a = c2(parseFloat(inp.value));
+        if (!isFinite(a)){ toast("ใส่ยอดเงินที่มีอยู่จริงตอนนี้", true); return; }
+        balEdit = ""; store.setSetting("accBal", {...accBals(), [k]: {amt: a, date: todayISO, at: Date.now()}});
+        toast(`ตั้งยอด ${k} เป็น ${fmt(a)} บาทแล้ว`);
+      };
+      ok.addEventListener("click", save); inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); save(); } });
+      const lab = el("label", "", `ยอดเงินจริงใน ${k} ตอนนี้ (บาท)`);
+      const d = el("div", "field"); d.append(lab, inp);
+      f.append(d, el("p", "hint", "ดูยอดในแอปธนาคารแล้วใส่ตรงนี้ครั้งเดียว ต่อจากนี้แอปจะบวกรายรับ ลบรายจ่าย และนับการโอนระหว่างบัญชีที่บันทึกหลังจากนี้ให้เอง ถ้ายอดเพี้ยนก็กดแก้ยอดใหม่ได้"), ok);
+      if (v.set){
+        const clr = el("button", "btn sm", "ล้างยอดที่ตั้งไว้"); clr.type = "button";
+        clr.addEventListener("click", () => { const b = {...accBals()}; delete b[k]; balEdit = ""; store.setSetting("accBal", b); });
+        f.append(" ", clr);
+      }
+      fc.append(f); fr.append(fc); tb.append(fr);
+      setTimeout(() => inp.focus(), 0);
+    }
+  });
+  const ft = el("tr"), fl = el("td"); fl.append(el("strong", "", "รวมทุกบัญชี"));
+  const fa = el("td", "n" + (total < 0 ? " neg" : "")); fa.append(el("strong", "", (total < 0 ? "−" : "") + fmt(Math.abs(total)) + " บาท"));
+  ft.append(fl, fa, el("td")); tb.append(ft);
+  t.append(tb); const sc = el("div", "scroll"); sc.append(t); box.append(sc);
+  box.append(el("p", "hint", "นับเฉพาะรายการที่ใส่ว่าเข้า/จากบัญชีไหน (โอน/สแกนจ่าย หรือเงินสด) และการโอนระหว่างบัญชี ถึงวันนี้ · กด ตั้งยอด เพื่อใส่ยอดจริงจากแอปธนาคารครั้งแรก"));
+  box.append(el("div", "cc-h", "เข้า-ออกในช่วงที่เปิดดู"));
+}
 let trOpen = false;
 function renderAccPanel(P){
   const box = $("oAcc"); box.textContent = "";
+  renderBalances(box);
   const rows = accFlows(P);
   if (rows.length){
     const t = el("table"), hd = el("thead"), hr = el("tr");
