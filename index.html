@@ -590,6 +590,13 @@ details summary{cursor:pointer;font-weight:500}
       <p class="hint" style="margin:0">แตะวันที่ในปฏิทินรายรับ/รายจ่าย จะมีปุ่มติ๊กตามรายชื่อนี้ ครบทุกแอปถึงขึ้นกากบาท วันที่เช็คครบไปแล้วยังนับว่าครบ แม้เพิ่มแอปใหม่</p>
       <div id="checkApps" class="ca"></div>
     </div>
+    <div class="panel" id="nameEditPanel">
+      <h2>ชื่อรายการ</h2>
+      <p class="hint" style="margin:0">ค้นหาชื่อรายการ (รายละเอียด) แล้วกดแก้ชื่อ รายการเก่าทุกรายการที่ใช้ชื่อนี้จะเปลี่ยนตามทั้งหมด ถ้าตั้งเป็นชื่อที่มีอยู่แล้วจะรวมเป็นชื่อเดียวกัน</p>
+      <div class="itm-find"><input id="nmSearch" type="search" placeholder="ค้นหาชื่อรายการ เช่น ช็อคโก" aria-label="ค้นหาชื่อรายการ"><select id="nmCat" aria-label="หมวด"></select></div>
+      <div class="hint" id="nmCount"></div>
+      <div id="nmList"></div>
+    </div>
     <div class="panel">
       <h2>รายละเอียดที่ล็อกหมวดไว้</h2>
       <p class="hint" style="margin:0">เลือกหรือพิมพ์รายละเอียดเหล่านี้ตอนบันทึกรายจ่าย แอปจะเปลี่ยนหมวดให้เอง</p>
@@ -1507,7 +1514,7 @@ function render(){
   $("periodLabel").textContent = periodLabel();
   for (const k in colorMaps) delete colorMaps[k];
   const P = entries.filter(inPeriod);
-  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); renderAccounts(); renderNoteCats(); }})[page](P);
+  ({overall: renderOverall, income: renderIncome, expense: renderExpense, saving: renderSaving, shop: renderShop, plan: renderPlan, settings: () => { renderHistory(); renderCatColors(); renderCheckApps(); renderAccounts(); renderNoteCats(); renderNames(); }})[page](P);
   fillLists();
 }
 let histLimit = 5;
@@ -2561,6 +2568,68 @@ function renderItems(){
 }
 $("cmpOne").addEventListener("change", () => renderCompare());
 
+/* ---------- ตั้งค่า › ชื่อรายการ: rename or merge any item name (รายละเอียด), personal or shop, everywhere it is used ---------- */
+let nmEdit = null, nmOpen = null, nmLimit = 30;
+const nmPool = () => allEntries.filter(e => (e.kind === "expense" || e.kind === "income") && (e.note || "").trim());
+function renderNames(){
+  const box = $("nmList"); if (!box) return;
+  const pool = nmPool(), by = new Map();
+  for (const e of pool){ const k = itmKey(e); (by.get(k) || by.set(k, {name: k, xs: []}).get(k)).xs.push(e); }
+  const all = [...by.values()];
+  const cs = $("nmCat"), cur = cs.value, cats = [...new Set(pool.map(e => e.name || "ไม่ระบุหมวด"))].sort((a, b) => a.localeCompare(b, "th"));
+  cs.textContent = ""; cs.append(opt("", "ทุกหมวด"), ...cats.map(c => opt(c, c))); cs.value = cats.includes(cur) ? cur : "";
+  const dl = $("itmNames"); dl.textContent = "";
+  all.map(v => v.name).sort((a, b) => a.localeCompare(b, "th")).forEach(n => dl.append(opt(n, n)));
+  const q = thaiFold($("nmSearch").value).trim().toLowerCase(), cat = cs.value;
+  const list = all.filter(v => (!q || thaiFold(v.name).toLowerCase().includes(q)) && (!cat || v.xs.some(e => (e.name || "ไม่ระบุหมวด") === cat)))
+    .sort((a, b) => b.xs.length - a.xs.length || a.name.localeCompare(b.name, "th"));
+  $("nmCount").textContent = list.length ? `${list.length} ชื่อ${list.length > nmLimit ? ` · แสดง ${nmLimit} ชื่อที่ใช้บ่อยสุด` : ""}` : "";
+  box.textContent = "";
+  if (!list.length){ box.append(el("div", "empty", pool.length ? "ไม่พบชื่อที่ค้นหา" : "ยังไม่มีรายการที่ใส่รายละเอียด")); return; }
+  // the one being edited stays on screen even past the limit
+  const shown = list.slice(0, nmLimit); if (nmEdit && !shown.some(v => v.name === nmEdit.name)){ const v = list.find(v => v.name === nmEdit.name); if (v) shown.push(v); }
+  for (const v of shown){
+    const row = el("div", "itm-row"), h = el("div", "itm-h");
+    h.append(el("strong", "", v.name), el("span", "num", fmt(v.xs.reduce((a, e) => a + (Number(e.amount) || 0), 0))));
+    const last = v.xs.reduce((a, e) => !a || e.date > a.date ? e : a, null);
+    const cats = [...new Set(v.xs.map(e => e.name || "ไม่ระบุหมวด"))].join(", ");
+    row.append(h, el("div", "hint", [`${v.xs.length} รายการ`, `หมวด ${cats}`, last ? `ล่าสุด ${thaiDate(last.date)}` : ""].filter(Boolean).join(" · ")));
+    const n0 = itmNorm(v.name);
+    const sim = all.filter(w => w !== v && (() => { const n1 = itmNorm(w.name); return n1 === n0 || (Math.min(n0.length, n1.length) >= 3 && (n1.includes(n0) || n0.includes(n1))); })()).slice(0, 3);
+    const acts = el("div", "itm-a");
+    const b = t => { const x = el("button", "btn sm", t); x.type = "button"; x.disabled = itmBusy; acts.append(x); return x; };
+    const editing = nmEdit && nmEdit.name === v.name;
+    b("✎ แก้ชื่อ").addEventListener("click", () => { nmEdit = editing ? null : {name: v.name, to: v.name, fresh: true}; renderNames(); });
+    sim.forEach(w => b(`รวมกับ “${w.name}”`).addEventListener("click", () => { nmEdit = {name: v.name, to: w.name, fresh: true}; renderNames(); }));
+    b(nmOpen === v.name ? "ซ่อนรายการ" : "ดูรายการ").addEventListener("click", () => { nmOpen = nmOpen === v.name ? null : v.name; renderNames(); });
+    row.append(acts);
+    if (editing){
+      const f = el("div", "itm-ed"), inp = document.createElement("input");
+      inp.value = nmEdit.to; inp.setAttribute("list", "itmNames"); inp.setAttribute("aria-label", "ชื่อใหม่ของ " + v.name);
+      inp.addEventListener("input", () => { nmEdit.to = inp.value; });
+      const ok = el("button", "btn sm primary", "บันทึกชื่อ"), no = el("button", "btn sm", "ยกเลิก"); ok.type = no.type = "button";
+      const go = async () => {
+        const to = inp.value.trim().replace(/\s+/g, " ");
+        if (!to){ inp.focus(); return; }
+        if (to === v.name){ nmEdit = null; renderNames(); return; }
+        const into = by.get(to);
+        if (!confirm(into ? `รวม “${v.name}” ${v.xs.length} รายการ เข้ากับ “${to}” (มีอยู่แล้ว ${into.xs.length} รายการ) ใช่ไหม` : `เปลี่ยนชื่อ “${v.name}” เป็น “${to}” ทั้ง ${v.xs.length} รายการ ใช่ไหม`)) return;
+        itmBusy = true; nmEdit = null; renderNames();
+        try { const n = await itmRename(v.name, to, pool); if (nmOpen === v.name) nmOpen = to; toast(`${into ? "รวม" : "เปลี่ยนชื่อ"} ${n} รายการเป็น “${to}” แล้ว`); } catch (err){ toast(err.message, true); }
+        itmBusy = false; render();
+      };
+      ok.addEventListener("click", go); no.addEventListener("click", () => { nmEdit = null; renderNames(); });
+      inp.addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); go(); } });
+      f.append(inp, ok, no); row.append(f);
+      if (nmEdit.fresh){ nmEdit.fresh = false; setTimeout(() => inp.focus(), 0); }
+    }
+    if (nmOpen === v.name){ const lb = el("div", "list"); entryList(lb, v.xs, "nm"); row.append(lb); }
+    box.append(row);
+  }
+  if (list.length > nmLimit){ const m = el("button", "btn sm more", `ดูเพิ่ม (อีก ${list.length - nmLimit} ชื่อ)`); m.type = "button"; m.addEventListener("click", () => { nmLimit += 50; renderNames(); }); box.append(m); }
+}
+$("nmSearch").addEventListener("input", () => { nmLimit = 30; renderNames(); });
+$("nmCat").addEventListener("change", () => { nmLimit = 30; renderNames(); });
 /* ---------- every purchase with the store it was bought from, store by store: tidy names before anything else ---------- */
 let fromStore = "", fromEdit = null, fromOpen = null;
 const fromPool = () => entries.filter(e => e.kind === "expense" && (e.shop || "").trim() && (bizOf(e) !== PERSONAL || e.src === "sheet"));
