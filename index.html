@@ -1900,8 +1900,14 @@ setTimeout(() => {
 }, 0);
 const ckKey = kind => kind === "income" ? "checkedDaysInc" : "checkedDays";
 const srcKey = kind => kind === "income" ? "checkSrcInc" : "checkSrc";
-function srcsOf(iso, kind){
+// the expense and income pages share one tick list per day: what is ticked on either page shows on both
+const KINDS = ["expense", "income"];
+function srcsOf(iso){
   loadSrcs();
+  const have = new Set(KINDS.flatMap(k => srcsOf1(iso, k)));
+  return CHECK_SRC.filter(s => have.has(s));
+}
+function srcsOf1(iso, kind){
   if ((settings[ckKey(kind)] || []).includes(iso)) return [...CHECK_SRC];
   const l = (settings[srcKey(kind)] || {})[iso] || [];
   // "*" = finished; a day ticked for every app of the first list was finished too
@@ -1909,24 +1915,20 @@ function srcsOf(iso, kind){
   return l.filter(s => CHECK_SRC.includes(s));
 }
 const isChecked = (iso, kind) => srcsOf(iso, kind).length >= CHECK_SRC.length;
-function setSrcs(iso, kind, list){
-  const old = settings[ckKey(kind)] || [];
-  if (old.includes(iso)) store.setSetting(ckKey(kind), old.filter(d => d !== iso));
-  const m = {...(settings[srcKey(kind)] || {})};
-  if (CHECK_SRC.every(s => list.includes(s))) m[iso] = ["*"];
-  else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
-  store.setSetting(srcKey(kind), m);
-}
+function setSrcs(iso, kind, list){ setSrcsMany([iso], kind, () => list); }
 // several days at once (multi-day ticking on the calendar): one write for all of them
+// writes the same ticks to both pages
 function setSrcsMany(days, kind, fn){
-  const old = settings[ckKey(kind)] || [], m = {...(settings[srcKey(kind)] || {})};
-  days.forEach(iso => {
-    const list = fn(srcsOf(iso, kind));
-    if (CHECK_SRC.every(s => list.includes(s))) m[iso] = ["*"];
-    else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
+  const lists = new Map(days.map(iso => [iso, fn(srcsOf(iso))]));
+  KINDS.forEach(k => {
+    const old = settings[ckKey(k)] || [], m = {...(settings[srcKey(k)] || {})};
+    lists.forEach((list, iso) => {
+      if (CHECK_SRC.every(s => list.includes(s))) m[iso] = ["*"];
+      else if (list.length) m[iso] = CHECK_SRC.filter(s => list.includes(s)); else delete m[iso];
+    });
+    if (old.some(d => days.includes(d))) store.setSetting(ckKey(k), old.filter(d => !days.includes(d)));
+    store.setSetting(srcKey(k), m);
   });
-  if (old.some(d => days.includes(d))) store.setSetting(ckKey(kind), old.filter(d => !days.includes(d)));
-  store.setSetting(srcKey(kind), m);
 }
 let multiDays = null; // Set of picked days while picking several days on the calendar
 function toggleChecked(iso, kind){ setSrcs(iso, kind, isChecked(iso, kind) ? [] : [...CHECK_SRC]); }
